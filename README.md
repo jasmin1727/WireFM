@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk">
-    <img src="https://img.shields.io/badge/_Download_Android_APK-WireFM.apk-8B5CF6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="42" />
+    <img src="https://img.shields.io/badge/Download_Android_APK-WireFM.apk-8B5CF6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="42" />
   </a>
   <a href="#-quick-start-pc">
     <img src="https://img.shields.io/badge/💻_Install_on_Linux-1--Line_Curl-4ECCA3?style=for-the-badge&logo=linux&logoColor=white" alt="Linux Install" height="42" />
@@ -65,7 +65,6 @@ Terminal will show:
 ---
 
 ## 📱 Mobile App (Android)
-
 
 1. Download [`WireFM.apk`](https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk) onto your phone and install.
 2. Open the app and tap **"Connect Your Pc (Scan QR)"**.

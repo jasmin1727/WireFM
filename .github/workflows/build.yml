@@ -14,8 +14,6 @@ jobs:
   build-android:
     name: 📱 Build Android APK
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -26,9 +24,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Accept Android SDK Licenses
+      - name: Configure Android SDK
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          echo "sdk.dir=/usr/local/lib/android/sdk" > android/local.properties
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -38,7 +37,7 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          gradle assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace --no-daemon
           mkdir -p ../dist
           cp app/build/outputs/apk/debug/app-debug.apk ../dist/WireFM.apk
 

@@ -2,9 +2,7 @@
   <img src="Assets/benner.png" alt="WireFM Banner" width="100%" />
 </p>
 
-<p align="center">
-  <img src="Assets/namelg.png" alt="WireFM" width="300px" />
-</p>
+
 
 <p align="center">
   <a href="https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk">

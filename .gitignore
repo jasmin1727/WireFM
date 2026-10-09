@@ -1,0 +1,17 @@
+# Binaries & Build dirs
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Android build
+.gradle/
+build/
+*/build/
+*.iml
+.idea/
+local.properties
+
+# OS files
+.DS_Store
+Thumbs.db

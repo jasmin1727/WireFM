@@ -1,0 +1,113 @@
+name: Build & Release WireFM
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: 📱 Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Android APK
+        run: |
+          cd android
+          gradle assembleDebug --stacktrace
+          mkdir -p ../dist
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/WireFM.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WireFM-Android-APK
+          path: dist/WireFM.apk
+
+  build-linux:
+    name: 🐧 Build Linux Binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+
+      - name: Build Standalone Binary
+        run: |
+          mkdir -p dist
+          cd server
+          go build -ldflags="-s -w" -o ../dist/wirefm-linux-amd64 .
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WireFM-Linux-Binary
+          path: dist/wirefm-linux-amd64
+
+  release:
+    name: 🚀 Publish Release
+    needs: [build-android, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WireFM-Android-APK
+          path: dist/
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WireFM-Linux-Binary
+          path: dist/
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: "WireFM ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest Release' }}"
+          body: |
+            ### 📡 WireFM Release Assets
+            
+            - 📱 **Android APK**: Download [`WireFM.apk`](https://github.com/${{ github.repository }}/releases/latest/download/WireFM.apk) to install on your phone.
+            - 🐧 **Linux Standalone Binary**: [`wirefm-linux-amd64`](https://github.com/${{ github.repository }}/releases/latest/download/wirefm-linux-amd64) (No dependencies needed).
+            
+            **Quick Install on Linux:**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+            ```
+          files: |
+            dist/WireFM.apk
+            dist/wirefm-linux-amd64
+          prerelease: false
+          generate_release_notes: true

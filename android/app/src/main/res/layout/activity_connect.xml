@@ -39,19 +39,20 @@
 
         <!-- Icon / Graphic -->
         <androidx.cardview.widget.CardView
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:layout_gravity="center_horizontal"
-            app:cardCornerRadius="16dp"
+            app:cardCornerRadius="18dp"
             app:cardBackgroundColor="@color/card_bg"
             app:cardElevation="0dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+            <ImageView
+                android:layout_width="60dp"
+                android:layout_height="60dp"
                 android:layout_gravity="center"
-                android:text="📡"
-                android:textSize="32sp" />
+                android:src="@drawable/app_logo"
+                android:contentDescription="WireFM Logo"
+                android:adjustViewBounds="true" />
         </androidx.cardview.widget.CardView>
 
         <Space

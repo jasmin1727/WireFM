@@ -76,7 +76,6 @@ Terminal will show:
 1. Local IP & WebDAV endpoints.
 2. An ASCII QR Code.
 3. Open the link in any browser or scan with the **WireFM Android App**.
-
 ---
 ## 📱 WireFM Mobile App (Android)
 <table>
@@ -93,8 +92,6 @@ Terminal will show:
     </td>
   </tr>
 </table>
-
-
 1. Download [`WireFM.apk`](https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk) onto your phone and install.
 2. Open the app and tap **"Connect Your Pc (Scan QR)"**.
 3. Point your camera at the PC terminal's QR code.

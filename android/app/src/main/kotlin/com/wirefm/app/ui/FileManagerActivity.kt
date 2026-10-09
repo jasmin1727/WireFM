@@ -1,4 +1,4 @@
-package com.wirefm.ui
+package com.wirefm.app.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -10,10 +10,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.wirefm.adapter.FileAdapter
 import com.wirefm.app.R
-import com.wirefm.model.FileItem
-import com.wirefm.network.WireFMClient
+import com.wirefm.app.adapter.FileAdapter
+import com.wirefm.app.model.FileItem
+import com.wirefm.app.network.WireFMClient
 import kotlinx.coroutines.*
 
 class FileManagerActivity : AppCompatActivity() {

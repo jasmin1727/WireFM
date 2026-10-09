@@ -1,4 +1,4 @@
-package com.wirefm.ui
+package com.wirefm.app.ui
 
 import android.content.Intent
 import android.os.Bundle
@@ -8,7 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.zxing.integration.android.IntentIntegrator
 import com.wirefm.app.R
 import com.wirefm.app.databinding.ActivityConnectBinding
-import com.wirefm.network.WireFMClient
+import com.wirefm.app.network.WireFMClient
 import kotlinx.coroutines.*
 
 class ConnectActivity : AppCompatActivity() {

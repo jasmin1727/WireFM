@@ -52,17 +52,8 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("com.google.zxing:core:3.5.3")
 
-    // QR Code Generator
-    implementation("io.github.g0dkar:qrcode-kotlin-android:4.2.0")
-
-    // Image loading
-    implementation("io.coil-kt:coil:2.7.0")
-
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // WebDAV server (for phone-to-PC access)
-    implementation("com.github.thegrizzlylabs:sardine-android:0.9")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

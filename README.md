@@ -1,5 +1,9 @@
 # 📡 WireFM
 
+<p align="center">
+  <img src="Assets/benner.png" alt="WireFM Banner" width="100%" />
+</p>
+
 > **Ultra-lightweight, zero-config wireless file manager connecting Linux PC & Android phones via QR code and WebDAV.**
 
 ---

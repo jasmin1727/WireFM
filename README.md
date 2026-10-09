@@ -60,6 +60,7 @@
 
 ## 🚀 Quick Start (PC)
 
+
 ### 1-Line Install (Arch / Ubuntu / Debian / Fedora):
 ```bash
 curl -sSL https://raw.githubusercontent.com/jasmin1727/WireFM/main/install.sh | bash

@@ -78,12 +78,22 @@ Terminal will show:
 3. Open the link in any browser or scan with the **WireFM Android App**.
 
 ---
+## 📱 WireFM Mobile App (Android)
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <img src="Assets/lg.png" width="160" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk">
+        <b>⬇️ Download</b>
+      </a>
+    </td>
+  </tr>
+</table>
 
-## 📱 Mobile App (Android)
-
-<p align="center">
-  <img src="Assets/lg.png" alt="WireFM App Icon" width="80" />
-</p>
 
 1. Download [`WireFM.apk`](https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk) onto your phone and install.
 2. Open the app and tap **"Connect Your Pc (Scan QR)"**.

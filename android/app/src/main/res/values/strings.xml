@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">WireFM</string>
+    <string name="connect_your_pc">Connect Your Pc</string>
+    <string name="enter_ip">Enter IP (e.g. 192.168.1.100)</string>
+    <string name="connect">Connect</string>
+    <string name="internal_storage">Internal storage</string>
+    <string name="pc_storage">PC Storage</string>
+</resources>

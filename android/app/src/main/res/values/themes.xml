@@ -1,0 +1,15 @@
+<resources>
+    <style name="Theme.WireFM" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/purple_primary</item>
+        <item name="colorPrimaryVariant">@color/purple_dark</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="android:windowBackground">@color/purple_bg</item>
+        <item name="android:statusBarColor">@color/purple_dark</item>
+    </style>
+
+    <style name="WireFMDialog" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="colorSurface">@color/card_bg</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorPrimary">@color/purple_light</item>
+    </style>
+</resources>

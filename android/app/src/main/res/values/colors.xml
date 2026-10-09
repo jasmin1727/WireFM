@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_primary">#9D85EE</color>
+    <color name="purple_dark">#6E54C4</color>
+    <color name="purple_light">#B8A7F4</color>
+    <color name="purple_bg">#C7B9F8</color>
+    <color name="card_bg">#8C74DE</color>
+    <color name="card_stroke">#5E46A7</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_dark">#2B244D</color>
+    <color name="accent_green">#4ECCA3</color>
+    <color name="danger_red">#FF6B6B</color>
+</resources>

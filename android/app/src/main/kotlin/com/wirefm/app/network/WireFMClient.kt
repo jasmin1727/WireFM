@@ -149,5 +149,22 @@ object WireFMClient {
         } catch (e: Exception) { false }
     }
 
+    fun sendPhoneHeartbeat(ip: String, port: String, pass: String, deviceName: String, currentPath: String, files: List<Map<String, Any>>): Boolean {
+        return try {
+            val payload = mapOf(
+                "device_name" to deviceName,
+                "current_path" to currentPath,
+                "files" to files
+            )
+            val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/phone/heartbeat")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
     private fun encode(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
 }

@@ -172,10 +172,44 @@ class FileManagerActivity : AppCompatActivity() {
         navigateToPc(root)
     }
 
+    private var heartbeatJob: kotlinx.coroutines.Job? = null
+
     override fun onResume() {
         super.onResume()
         if (isPhoneStorage && checkStoragePermission()) {
             loadPhoneFiles(currentPhoneDir)
+        }
+        startHeartbeat()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        heartbeatJob?.cancel()
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (true) {
+                try {
+                    val phoneRoot = Environment.getExternalStorageDirectory() ?: File("/storage/emulated/0")
+                    val filesList = if (checkStoragePermission()) {
+                        phoneRoot.listFiles()?.take(60)?.map { f ->
+                            mapOf<String, Any>(
+                                "name" to f.name,
+                                "path" to f.absolutePath,
+                                "is_dir" to f.isDirectory,
+                                "size" to if (f.isDirectory) 0L else f.length(),
+                                "ext" to if (f.isDirectory) "" else "." + f.extension.lowercase()
+                            )
+                        } ?: emptyList()
+                    } else emptyList()
+
+                    val devName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+                    WireFMClient.sendPhoneHeartbeat(ip, port, pass, devName, phoneRoot.absolutePath, filesList)
+                } catch (_: Exception) {}
+                kotlinx.coroutines.delay(12000)
+            }
         }
     }
 

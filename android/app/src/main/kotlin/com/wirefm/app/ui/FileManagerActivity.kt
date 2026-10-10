@@ -1,11 +1,15 @@
 package com.wirefm.app.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -18,6 +22,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -42,6 +48,7 @@ class FileManagerActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var tabPc: LinearLayout
     private lateinit var tabPhone: LinearLayout
+    private lateinit var btnPaste: TextView
     private lateinit var btnMenu: View
     private lateinit var adapter: FileAdapter
 
@@ -52,8 +59,10 @@ class FileManagerActivity : AppCompatActivity() {
     private var currentPhoneDir: File = Environment.getExternalStorageDirectory() ?: File("/")
     private var isPhoneStorage = false
 
+    // Clipboard state
     private var clipboard: FileItem? = null
-    private var clipAction = ""
+    private var clipAction: String = "" // "copy" or "cut"
+    private var clipboardSource: String = "" // "pc" or "phone"
 
     // Multi-file picker for uploading from phone to PC
     private val pickFilesLauncher = registerForActivityResult(
@@ -61,6 +70,18 @@ class FileManagerActivity : AppCompatActivity() {
     ) { uris: List<Uri>? ->
         if (!uris.isNullOrEmpty()) {
             uploadSelectedUris(uris)
+        }
+    }
+
+    // Permission launcher for older Android versions (< 11)
+    private val requestPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val granted = perms.values.all { it }
+        if (granted) {
+            loadPhoneFiles(currentPhoneDir)
+        } else {
+            toast("Storage permission denied")
         }
     }
 
@@ -83,6 +104,7 @@ class FileManagerActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         tabPc = findViewById(R.id.tabPc)
         tabPhone = findViewById(R.id.tabPhone)
+        btnPaste = findViewById(R.id.btnPaste)
         btnMenu = findViewById(R.id.btnMenu)
 
         adapter = FileAdapter(
@@ -127,8 +149,17 @@ class FileManagerActivity : AppCompatActivity() {
             if (!isPhoneStorage) {
                 isPhoneStorage = true
                 updateTabStyles()
-                loadPhoneFiles(currentPhoneDir)
+                if (checkStoragePermission()) {
+                    loadPhoneFiles(currentPhoneDir)
+                } else {
+                    requestStoragePermission()
+                }
             }
+        }
+
+        // Paste button listener
+        btnPaste.setOnClickListener {
+            handlePasteAction()
         }
 
         // Setup top header 3-dots menu
@@ -137,7 +168,15 @@ class FileManagerActivity : AppCompatActivity() {
         }
 
         updateTabStyles()
+        updateClipboardUI()
         navigateToPc(root)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isPhoneStorage && checkStoragePermission()) {
+            loadPhoneFiles(currentPhoneDir)
+        }
     }
 
     private fun updateTabStyles() {
@@ -147,6 +186,194 @@ class FileManagerActivity : AppCompatActivity() {
         } else {
             tabPc.alpha = 1.0f
             tabPhone.alpha = 0.5f
+        }
+    }
+
+    private fun updateClipboardUI() {
+        if (clipboard != null) {
+            btnPaste.alpha = 1.0f
+            btnPaste.setBackgroundResource(R.drawable.shape_paste_glow)
+            btnPaste.setPadding(24, 10, 24, 10)
+        } else {
+            btnPaste.alpha = 0.35f
+            btnPaste.background = null
+            btnPaste.setPadding(8, 8, 8, 8)
+        }
+    }
+
+    // ==========================================
+    // STORAGE PERMISSION (ANDROID 11+ & LEGACY)
+    // ==========================================
+
+    private fun checkStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            AlertDialog.Builder(this, R.style.WireFMDialog)
+                .setTitle("Storage Access Required")
+                .setMessage("To browse, manage, and transfer files from your phone's internal storage, WireFM needs 'All files access'.\n\nPlease allow it in the next screen.")
+                .setPositiveButton("Allow in Settings") { _, _ ->
+                    try {
+                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                        startActivity(intent)
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            requestPermissionsLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }
+    }
+
+    // ==========================================
+    // SMART PASTE ACTION (BIDIRECTIONAL & GLOW)
+    // ==========================================
+
+    private fun handlePasteAction() {
+        val cb = clipboard ?: run {
+            toast("Clipboard is empty! Copy or cut a file first.")
+            return
+        }
+
+        // Scenario 1: Clipboard from PHONE -> Currently in PC Storage -> UPLOAD to PC
+        if (clipboardSource == "phone" && !isPhoneStorage) {
+            val localFile = File(cb.path)
+            if (!localFile.exists()) {
+                toast("Source file no longer exists")
+                clipboard = null
+                updateClipboardUI()
+                return
+            }
+            toast("Uploading to PC: ${localFile.name}...")
+            progressBar.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    WireFMClient.uploadFile(ip, port, pass, currentPcPath, localFile)
+                }
+                progressBar.visibility = View.GONE
+                if (ok) {
+                    toast("✓ Pasted to PC: ${localFile.name}")
+                    if (clipAction == "cut") {
+                        localFile.delete()
+                        clipboard = null
+                    }
+                    updateClipboardUI()
+                    navigateToPc(currentPcPath)
+                } else {
+                    toast("Failed to paste to PC")
+                }
+            }
+            return
+        }
+
+        // Scenario 2: Clipboard from PC -> Currently in PHONE Storage -> DOWNLOAD to Phone
+        if (clipboardSource == "pc" && isPhoneStorage) {
+            toast("Downloading to Phone: ${cb.name}...")
+            progressBar.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                val downloaded = withContext(Dispatchers.IO) {
+                    WireFMClient.downloadFile(ip, port, pass, cb.path, currentPhoneDir)
+                }
+                progressBar.visibility = View.GONE
+                if (downloaded != null) {
+                    MediaScannerConnection.scanFile(
+                        this@FileManagerActivity,
+                        arrayOf(downloaded.absolutePath),
+                        null,
+                        null
+                    )
+                    toast("✓ Pasted to Phone: ${downloaded.name}")
+                    if (clipAction == "cut") {
+                        withContext(Dispatchers.IO) {
+                            WireFMClient.deleteFile(ip, port, pass, cb.path)
+                        }
+                        clipboard = null
+                    }
+                    updateClipboardUI()
+                    loadPhoneFiles(currentPhoneDir)
+                } else {
+                    toast("Failed to download and paste to Phone")
+                }
+            }
+            return
+        }
+
+        // Scenario 3: Clipboard from PC -> Currently in PC Storage -> Local PC copy/move
+        if (clipboardSource == "pc" && !isPhoneStorage) {
+            val dest = "$currentPcPath/${cb.name}"
+            progressBar.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    if (clipAction == "cut") WireFMClient.moveFile(ip, port, pass, cb.path, dest)
+                    else WireFMClient.copyFile(ip, port, pass, cb.path, dest)
+                }
+                progressBar.visibility = View.GONE
+                if (ok) {
+                    if (clipAction == "cut") clipboard = null
+                    updateClipboardUI()
+                    navigateToPc(currentPcPath)
+                    toast("✓ Pasted!")
+                } else {
+                    toast("Paste failed on PC")
+                }
+            }
+            return
+        }
+
+        // Scenario 4: Clipboard from PHONE -> Currently in PHONE Storage -> Local Phone copy/move
+        if (clipboardSource == "phone" && isPhoneStorage) {
+            val srcFile = File(cb.path)
+            val destFile = File(currentPhoneDir, srcFile.name)
+            progressBar.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        if (clipAction == "cut") {
+                            srcFile.renameTo(destFile)
+                        } else {
+                            srcFile.copyTo(destFile, overwrite = true)
+                            true
+                        }
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+                progressBar.visibility = View.GONE
+                if (ok) {
+                    MediaScannerConnection.scanFile(
+                        this@FileManagerActivity,
+                        arrayOf(destFile.absolutePath),
+                        null,
+                        null
+                    )
+                    if (clipAction == "cut") clipboard = null
+                    updateClipboardUI()
+                    loadPhoneFiles(currentPhoneDir)
+                    toast("✓ Pasted to Phone!")
+                } else {
+                    toast("Paste failed on Phone")
+                }
+            }
+            return
         }
     }
 
@@ -189,8 +416,20 @@ class FileManagerActivity : AppCompatActivity() {
                 when (which) {
                     0 -> streamOrOpenFile(file)
                     1 -> downloadFileToPhone(file)
-                    2 -> { clipboard = file; clipAction = "copy"; toast("Copied: ${file.name}") }
-                    3 -> { clipboard = file; clipAction = "cut"; toast("Cut: ${file.name}") }
+                    2 -> {
+                        clipboard = file
+                        clipAction = "copy"
+                        clipboardSource = "pc"
+                        updateClipboardUI()
+                        toast("Copied: ${file.name}")
+                    }
+                    3 -> {
+                        clipboard = file
+                        clipAction = "cut"
+                        clipboardSource = "pc"
+                        updateClipboardUI()
+                        toast("Cut: ${file.name}")
+                    }
                     4 -> confirmDeletePc(file)
                     5 -> renamePcFile(file)
                 }
@@ -212,9 +451,21 @@ class FileManagerActivity : AppCompatActivity() {
                     selected.startsWith("📂 Open") -> navigateToPc(file.path)
                     selected.startsWith("▶️ Stream") -> streamOrOpenFile(file)
                     selected.startsWith("📥 Download") -> downloadFileToPhone(file)
-                    selected.startsWith("📋 Copy") -> { clipboard = file; clipAction = "copy"; toast("Copied") }
-                    selected.startsWith("✂️ Cut") -> { clipboard = file; clipAction = "cut"; toast("Cut") }
-                    selected.startsWith("📋 Paste") -> pasteFilePc()
+                    selected.startsWith("📋 Copy") -> {
+                        clipboard = file
+                        clipAction = "copy"
+                        clipboardSource = "pc"
+                        updateClipboardUI()
+                        toast("Copied")
+                    }
+                    selected.startsWith("✂️ Cut") -> {
+                        clipboard = file
+                        clipAction = "cut"
+                        clipboardSource = "pc"
+                        updateClipboardUI()
+                        toast("Cut")
+                    }
+                    selected.startsWith("📋 Paste") -> handlePasteAction()
                     selected.startsWith("🗑️ Delete") -> confirmDeletePc(file)
                     selected.startsWith("✏️ Rename") -> renamePcFile(file)
                 }
@@ -276,24 +527,6 @@ class FileManagerActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun pasteFilePc() {
-        val cb = clipboard ?: run { toast("Nothing in clipboard"); return }
-        val dest = "$currentPcPath/${cb.name}"
-        lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                if (clipAction == "cut") WireFMClient.moveFile(ip, port, pass, cb.path, dest)
-                else WireFMClient.copyFile(ip, port, pass, cb.path, dest)
-            }
-            if (ok) {
-                clipboard = null
-                navigateToPc(currentPcPath)
-                toast("Done!")
-            } else {
-                toast("Paste failed")
-            }
-        }
-    }
-
     private fun renamePcFile(file: FileItem) {
         val input = EditText(this).apply { setText(file.name) }
         AlertDialog.Builder(this, R.style.WireFMDialog)
@@ -325,13 +558,34 @@ class FileManagerActivity : AppCompatActivity() {
     // ==========================================
 
     private fun loadPhoneFiles(dir: File) {
+        if (!checkStoragePermission()) {
+            requestStoragePermission()
+            return
+        }
+
         currentPhoneDir = dir
         tvPath.text = "Phone: " + dir.absolutePath
         progressBar.visibility = View.VISIBLE
 
         lifecycleScope.launch {
             val list = withContext(Dispatchers.IO) {
-                val files = dir.listFiles() ?: arrayOf()
+                var files = dir.listFiles() ?: arrayOf()
+
+                // Fallback for root /storage/emulated/0 if empty
+                if (files.isEmpty() && (dir.absolutePath == "/storage/emulated/0" || dir.absolutePath == Environment.getExternalStorageDirectory().absolutePath)) {
+                    val defaultFolders = listOf(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                    ).filter { it != null && it.exists() }.toTypedArray()
+                    if (defaultFolders.isNotEmpty()) {
+                        files = defaultFolders
+                    }
+                }
+
                 files.map { f ->
                     val ext = if (f.isDirectory) "" else "." + f.extension.lowercase(Locale.getDefault())
                     val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(f.lastModified()))
@@ -355,14 +609,40 @@ class FileManagerActivity : AppCompatActivity() {
     private fun showPhoneFileOptions(file: FileItem) {
         val options = arrayOf(
             "📤 Upload to PC ($currentPcPath)",
-            "📂 Open File"
+            "📋 Copy",
+            "✂️ Cut",
+            "📂 Open File",
+            "🗑️ Delete"
         )
         AlertDialog.Builder(this, R.style.WireFMDialog)
             .setTitle(file.name)
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> uploadLocalFileToPc(File(file.path))
-                    1 -> openLocalPhoneFile(File(file.path), file.ext)
+                    1 -> {
+                        clipboard = file
+                        clipAction = "copy"
+                        clipboardSource = "phone"
+                        updateClipboardUI()
+                        toast("Copied from Phone: ${file.name}")
+                    }
+                    2 -> {
+                        clipboard = file
+                        clipAction = "cut"
+                        clipboardSource = "phone"
+                        updateClipboardUI()
+                        toast("Cut from Phone: ${file.name}")
+                    }
+                    3 -> openLocalPhoneFile(File(file.path), file.ext)
+                    4 -> {
+                        val f = File(file.path)
+                        if (f.delete()) {
+                            loadPhoneFiles(currentPhoneDir)
+                            toast("Deleted")
+                        } else {
+                            toast("Failed to delete")
+                        }
+                    }
                 }
             }.show()
     }
@@ -442,6 +722,7 @@ class FileManagerActivity : AppCompatActivity() {
     private fun showTopPopupMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.apply {
+            add("📋 Paste Here")
             add("📤 Upload Files to PC")
             add("📁 New Folder")
             add("🔄 Refresh")
@@ -449,6 +730,7 @@ class FileManagerActivity : AppCompatActivity() {
         }
         popup.setOnMenuItemClickListener { item ->
             when (item.title) {
+                "📋 Paste Here" -> handlePasteAction()
                 "📤 Upload Files to PC" -> pickFilesLauncher.launch("*/*")
                 "📁 New Folder" -> showNewFolderDialog()
                 "🔄 Refresh" -> if (isPhoneStorage) loadPhoneFiles(currentPhoneDir) else navigateToPc(currentPcPath)
@@ -515,7 +797,7 @@ class FileManagerActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (isPhoneStorage) {
             val parent = currentPhoneDir.parentFile
-            if (parent != null && parent.canRead()) {
+            if (parent != null && parent.canRead() && parent.absolutePath != "/") {
                 loadPhoneFiles(parent)
             } else {
                 isPhoneStorage = false

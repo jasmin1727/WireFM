@@ -481,6 +481,9 @@
     <p style="margin-top:12px;margin-bottom:0;text-align:center;font-size:12px">
       Or scan QR code with your phone camera app
     </p>
+  </div>
+</div>
+
 <!-- Drag and Drop Overlay -->
 <div class="drop-overlay" id="dropOverlay">
   <div class="drop-content">
@@ -709,17 +712,16 @@ function showConnect() {
 }
 
 // AUTO CONNECT
-window.onload = () => {
-  // Check if URL has params (from QR scan)
+window.onload = async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('password')) {
     serverPass = params.get('password');
-    serverIP = window.location.hostname;
+    serverIP = window.location.hostname || 'localhost';
     serverPort = window.location.port || '8080';
-    document.getElementById('connectModal').classList.add('hidden');
-    loadFiles('/');
-    document.getElementById('statusDot').style.background = 'var(--success)';
-    document.getElementById('statusText').textContent = 'Connected';
+    document.getElementById('serverIP').value = serverIP;
+    document.getElementById('serverPort').value = serverPort;
+    document.getElementById('serverPass').value = serverPass;
+    await connect();
     return;
   }
 
@@ -727,7 +729,6 @@ window.onload = () => {
     document.getElementById('serverIP').value = serverIP;
     document.getElementById('serverPort').value = serverPort;
     document.getElementById('serverPass').value = serverPass;
-    // Auto-try connect
     connect();
   }
 };

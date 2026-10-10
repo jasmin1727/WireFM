@@ -82,13 +82,13 @@ Terminal will show:
 <table>
   <tr>
     <td align="center" valign="middle">
-      <img src="Assets/lg.png" width="160" />
+      <img src="Assets/logo.png" width="160" alt="WireFM Logo" style="border-radius: 24px;" />
     </td>
   </tr>
   <tr>
     <td align="center">
       <a href="https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk">
-        <b>⬇️ Download</b>
+        <b>⬇️ Download WireFM.apk</b>
       </a>
     </td>
   </tr>

@@ -17,6 +17,7 @@ import (
 	"embed"
 	"io/fs"
 	"mime"
+	"os/exec"
 	"sync"
 )
 
@@ -237,6 +238,41 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func moveToTrash(filePath string) error {
+	// 1. Try gio trash (Standard Linux desktop trash)
+	cmd := exec.Command("gio", "trash", filePath)
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+
+	// 2. Try trash-put / trash CLI
+	cmdTrash := exec.Command("trash-put", filePath)
+	if err := cmdTrash.Run(); err == nil {
+		return nil
+	}
+	cmdTrash2 := exec.Command("trash", filePath)
+	if err := cmdTrash2.Run(); err == nil {
+		return nil
+	}
+
+	// 3. Fallback: move to ~/.local/share/Trash/files
+	home, err := os.UserHomeDir()
+	if err == nil {
+		trashDir := filepath.Join(home, ".local", "share", "Trash", "files")
+		os.MkdirAll(trashDir, 0755)
+		dest := filepath.Join(trashDir, filepath.Base(filePath))
+		if _, statErr := os.Stat(dest); statErr == nil {
+			dest = filepath.Join(trashDir, fmt.Sprintf("%d_%s", time.Now().Unix(), filepath.Base(filePath)))
+		}
+		if renameErr := os.Rename(filePath, dest); renameErr == nil {
+			return nil
+		}
+	}
+
+	// 4. Fallback if trash unavailable
+	return os.RemoveAll(filePath)
+}
+
 func deleteFile(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -246,14 +282,14 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cleanPath := resolvePath(path)
-	err := os.RemoveAll(cleanPath)
+	err := moveToTrash(cleanPath)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"success": "Deleted"})
+	json.NewEncoder(w).Encode(map[string]string{"success": "Moved to Recycle Bin"})
 }
 
 func copyFile(w http.ResponseWriter, r *http.Request) {

@@ -30,8 +30,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.wirefm.app.R
 import com.wirefm.app.adapter.FileAdapter
 import com.wirefm.app.model.FileItem
+import com.wirefm.app.model.PhoneCommand
 import com.wirefm.app.network.WireFMClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -173,6 +176,7 @@ class FileManagerActivity : AppCompatActivity() {
     }
 
     private var heartbeatJob: kotlinx.coroutines.Job? = null
+    private var phoneWorkerJob: kotlinx.coroutines.Job? = null
 
     override fun onResume() {
         super.onResume()
@@ -180,17 +184,19 @@ class FileManagerActivity : AppCompatActivity() {
             loadPhoneFiles(currentPhoneDir)
         }
         startHeartbeat()
+        startPhoneWorker()
     }
 
     override fun onPause() {
         super.onPause()
         heartbeatJob?.cancel()
+        phoneWorkerJob?.cancel()
     }
 
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = lifecycleScope.launch(Dispatchers.IO) {
-            while (true) {
+            while (isActive) {
                 try {
                     val phoneRoot = Environment.getExternalStorageDirectory() ?: File("/storage/emulated/0")
                     val filesList = if (checkStoragePermission()) {
@@ -200,7 +206,7 @@ class FileManagerActivity : AppCompatActivity() {
                                 "path" to f.absolutePath,
                                 "is_dir" to f.isDirectory,
                                 "size" to if (f.isDirectory) 0L else f.length(),
-                                "ext" to if (f.isDirectory) "" else "." + f.extension.lowercase()
+                                "ext" to if (f.isDirectory) "" else "." + f.extension.lowercase(java.util.Locale.getDefault())
                             )
                         } ?: emptyList()
                     } else emptyList()
@@ -208,7 +214,81 @@ class FileManagerActivity : AppCompatActivity() {
                     val devName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
                     WireFMClient.sendPhoneHeartbeat(ip, port, pass, devName, phoneRoot.absolutePath, filesList)
                 } catch (_: Exception) {}
-                kotlinx.coroutines.delay(12000)
+                delay(12000)
+            }
+        }
+    }
+
+    private fun startPhoneWorker() {
+        phoneWorkerJob?.cancel()
+        phoneWorkerJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val cmd = WireFMClient.pollPhoneCommand(ip, port, pass)
+                    if (cmd != null && cmd.id.isNotBlank()) {
+                        handlePhoneCommand(cmd)
+                    }
+                } catch (_: Exception) {
+                    delay(1000)
+                }
+            }
+        }
+    }
+
+    private suspend fun handlePhoneCommand(cmd: PhoneCommand) {
+        withContext(Dispatchers.IO) {
+            try {
+                when (cmd.action) {
+                    "list" -> {
+                        val dir = File(cmd.path)
+                        val files = if (dir.exists() && dir.isDirectory) {
+                            dir.listFiles()?.map { f ->
+                                mapOf<String, Any>(
+                                    "name" to f.name,
+                                    "path" to f.absolutePath,
+                                    "is_dir" to f.isDirectory,
+                                    "size" to if (f.isDirectory) 0L else f.length(),
+                                    "ext" to if (f.isDirectory) "" else "." + f.extension.lowercase(java.util.Locale.getDefault())
+                                )
+                            } ?: emptyList()
+                        } else emptyList()
+                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, true, files)
+                    }
+                    "read" -> {
+                        val file = File(cmd.path)
+                        if (file.exists() && file.isFile && !cmd.token.isNullOrBlank()) {
+                            WireFMClient.uploadPhoneStream(ip, port, pass, cmd.token, file)
+                        } else {
+                            WireFMClient.respondPhoneError(ip, port, pass, cmd.id, "File not found")
+                        }
+                    }
+                    "delete" -> {
+                        val file = File(cmd.path)
+                        val trashDir = File(Environment.getExternalStorageDirectory(), ".WireFM_Trash")
+                        if (!trashDir.exists()) trashDir.mkdirs()
+                        val trashFile = File(trashDir, "${System.currentTimeMillis()}_${file.name}")
+                        val ok = file.renameTo(trashFile) || file.delete()
+                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, ok, emptyList())
+                    }
+                    "mkdir" -> {
+                        val dir = File(cmd.path)
+                        val ok = dir.mkdirs()
+                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, ok, emptyList())
+                    }
+                    "rename" -> {
+                        val src = File(cmd.path)
+                        val dest = File(cmd.destPath ?: "")
+                        val ok = src.renameTo(dest)
+                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, ok, emptyList())
+                    }
+                    "write_from_pc" -> {
+                        val destFile = File(cmd.destPath ?: "")
+                        val ok = WireFMClient.downloadFileToExactPath(ip, port, pass, cmd.path, destFile)
+                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, ok, emptyList())
+                    }
+                }
+            } catch (e: Exception) {
+                WireFMClient.respondPhoneError(ip, port, pass, cmd.id, e.message ?: "Unknown error")
             }
         }
     }

@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.wirefm.app.model.FileItem
 import com.wirefm.app.model.ServerInfo
+import com.wirefm.app.model.PhoneCommand
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -163,6 +164,82 @@ object WireFMClient {
                 .post(body)
                 .build()
             client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    fun pollPhoneCommand(ip: String, port: String, pass: String): PhoneCommand? {
+        return try {
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/phone/poll")
+                .header("X-Password", pass)
+                .build()
+            val res = client.newCall(req).execute()
+            if (res.code == 200) {
+                val body = res.body?.string() ?: return null
+                val cmd = gson.fromJson(body, PhoneCommand::class.java)
+                if (cmd != null && cmd.id.isNotBlank()) cmd else null
+            } else null
+        } catch (e: Exception) { null }
+    }
+
+    fun respondPhoneCommand(ip: String, port: String, pass: String, id: String, success: Boolean, files: List<Map<String, Any>>): Boolean {
+        return try {
+            val payload = mapOf(
+                "id" to id,
+                "success" to success,
+                "files" to files
+            )
+            val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/phone/respond")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    fun respondPhoneError(ip: String, port: String, pass: String, id: String, error: String): Boolean {
+        return try {
+            val payload = mapOf(
+                "id" to id,
+                "success" to false,
+                "error" to error
+            )
+            val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/phone/respond")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    fun uploadPhoneStream(ip: String, port: String, pass: String, token: String, file: File): Boolean {
+        return try {
+            val mediaType = "application/octet-stream".toMediaType()
+            val body = file.asRequestBody(mediaType)
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/phone/stream_upload?token=${encode(token)}&name=${encode(file.name)}")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    fun downloadFileToExactPath(ip: String, port: String, pass: String, pcPath: String, destFile: File): Boolean {
+        return try {
+            val parent = destFile.parentFile
+            if (parent != null && !parent.exists()) parent.mkdirs()
+            val req = getRequest(ip, port, pass, "/api/download?path=${encode(pcPath)}")
+            val res = client.newCall(req).execute()
+            if (!res.isSuccessful) return false
+            res.body?.byteStream()?.use { input ->
+                destFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            true
         } catch (e: Exception) { false }
     }
 

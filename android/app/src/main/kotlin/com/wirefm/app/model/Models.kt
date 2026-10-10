@@ -18,3 +18,11 @@ data class ServerInfo(
     @SerializedName("root") val root: String,
     @SerializedName("version") val version: String
 )
+
+data class PhoneCommand(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("action") val action: String = "",
+    @SerializedName("path") val path: String = "",
+    @SerializedName("dest_path") val destPath: String? = null,
+    @SerializedName("token") val token: String? = null
+)

@@ -19,6 +19,7 @@ import (
 	"mime"
 	"os/exec"
 	"sync"
+	"math/rand"
 )
 
 //go:embed static/*
@@ -392,10 +393,75 @@ type PhoneState struct {
 	Files       []PhoneFile `json:"files"`
 }
 
+type PhoneCommand struct {
+	ID       string `json:"id"`
+	Action   string `json:"action"` // "list", "read", "delete", "mkdir", "rename", "write_from_pc"
+	Path     string `json:"path"`
+	DestPath string `json:"dest_path,omitempty"`
+	Token    string `json:"token,omitempty"`
+}
+
+type PhoneResponse struct {
+	ID      string      `json:"id"`
+	Success bool        `json:"success"`
+	Error   string      `json:"error,omitempty"`
+	Files   []PhoneFile `json:"files,omitempty"`
+}
+
 var (
-	phoneMu    sync.Mutex
-	phoneState PhoneState
+	phoneMu      sync.Mutex
+	phoneState   PhoneState
+	cmdQueue     = make(chan PhoneCommand, 50)
+	respWaiters  = make(map[string]chan PhoneResponse)
+	respMu       sync.Mutex
+	tokenWaiters = make(map[string]chan string)
+	tokenMu      sync.Mutex
 )
+
+func sendPhoneCommand(action, path, destPath string, timeout time.Duration) (*PhoneResponse, error) {
+	phoneMu.Lock()
+	connected := phoneState.Connected && time.Since(phoneState.LastSeen) < 45*time.Second
+	phoneMu.Unlock()
+	if !connected {
+		return nil, fmt.Errorf("phone not connected")
+	}
+
+	id := fmt.Sprintf("cmd_%d_%d", time.Now().UnixNano(), rand.Intn(10000))
+	respChan := make(chan PhoneResponse, 1)
+
+	respMu.Lock()
+	respWaiters[id] = respChan
+	respMu.Unlock()
+
+	defer func() {
+		respMu.Lock()
+		delete(respWaiters, id)
+		respMu.Unlock()
+	}()
+
+	cmd := PhoneCommand{
+		ID:       id,
+		Action:   action,
+		Path:     path,
+		DestPath: destPath,
+	}
+
+	select {
+	case cmdQueue <- cmd:
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("command queue full")
+	}
+
+	select {
+	case resp := <-respChan:
+		if !resp.Success && resp.Error != "" {
+			return &resp, fmt.Errorf("%s", resp.Error)
+		}
+		return &resp, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("phone command timed out")
+	}
+}
 
 func phoneHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -411,11 +477,17 @@ func phoneHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	phoneMu.Lock()
 	phoneState.Connected = true
-	phoneState.DeviceName = req.DeviceName
+	if req.DeviceName != "" {
+		phoneState.DeviceName = req.DeviceName
+	}
 	phoneState.IP = r.RemoteAddr
 	phoneState.LastSeen = time.Now()
-	phoneState.CurrentPath = req.CurrentPath
-	phoneState.Files = req.Files
+	if req.CurrentPath != "" {
+		phoneState.CurrentPath = req.CurrentPath
+	}
+	if len(req.Files) > 0 {
+		phoneState.Files = req.Files
+	}
 	phoneMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -432,6 +504,367 @@ func phoneStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(phoneState)
+}
+
+func phonePoll(w http.ResponseWriter, r *http.Request) {
+	phoneMu.Lock()
+	phoneState.Connected = true
+	phoneState.LastSeen = time.Now()
+	phoneMu.Unlock()
+
+	select {
+	case cmd := <-cmdQueue:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cmd)
+	case <-time.After(20 * time.Second):
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func phoneRespond(w http.ResponseWriter, r *http.Request) {
+	phoneMu.Lock()
+	phoneState.LastSeen = time.Now()
+	phoneMu.Unlock()
+
+	var resp PhoneResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	respMu.Lock()
+	ch, ok := respWaiters[resp.ID]
+	respMu.Unlock()
+
+	if ok {
+		select {
+		case ch <- resp:
+		default:
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func phoneStreamUpload(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	cacheDir := filepath.Join(os.TempDir(), "wirefm_cache")
+	os.MkdirAll(cacheDir, 0755)
+	tmpFile, err := os.CreateTemp(cacheDir, "phone_*")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, r.Body); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	tokenMu.Lock()
+	ch, ok := tokenWaiters[token]
+	tokenMu.Unlock()
+
+	if ok {
+		select {
+		case ch <- tmpFile.Name():
+		default:
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func phoneListFiles(w http.ResponseWriter, r *http.Request) {
+	phonePath := r.URL.Query().Get("path")
+	if phonePath == "" {
+		phoneMu.Lock()
+		phonePath = phoneState.CurrentPath
+		if phonePath == "" {
+			phonePath = "/storage/emulated/0"
+		}
+		phoneMu.Unlock()
+	}
+
+	resp, err := sendPhoneCommand("list", phonePath, "", 12*time.Second)
+	if err != nil {
+		phoneMu.Lock()
+		cachedFiles := phoneState.Files
+		phoneMu.Unlock()
+		if len(cachedFiles) > 0 && (phonePath == "/storage/emulated/0" || phonePath == "") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"path":  phonePath,
+				"files": cachedFiles,
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGatewayTimeout)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error(), "files": []PhoneFile{}})
+		return
+	}
+
+	phoneMu.Lock()
+	phoneState.CurrentPath = phonePath
+	phoneState.Files = resp.Files
+	phoneMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"path":  phonePath,
+		"files": resp.Files,
+	})
+}
+
+func phoneDownload(w http.ResponseWriter, r *http.Request) {
+	phonePath := r.URL.Query().Get("path")
+	inline := r.URL.Query().Get("inline") == "1"
+	if phonePath == "" {
+		http.Error(w, "Path required", http.StatusBadRequest)
+		return
+	}
+
+	token := fmt.Sprintf("tok_%d_%d", time.Now().UnixNano(), rand.Intn(10000))
+	tokenChan := make(chan string, 1)
+
+	tokenMu.Lock()
+	tokenWaiters[token] = tokenChan
+	tokenMu.Unlock()
+
+	defer func() {
+		tokenMu.Lock()
+		delete(tokenWaiters, token)
+		tokenMu.Unlock()
+	}()
+
+	cmd := PhoneCommand{
+		ID:     fmt.Sprintf("cmd_%d", time.Now().UnixNano()),
+		Action: "read",
+		Path:   phonePath,
+		Token:  token,
+	}
+
+	select {
+	case cmdQueue <- cmd:
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Phone busy", http.StatusGatewayTimeout)
+		return
+	}
+
+	select {
+	case filePath := <-tokenChan:
+		defer os.Remove(filePath)
+		file, err := os.Open(filePath)
+		if err != nil {
+			http.Error(w, "Failed to read cached file", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		stat, err := file.Stat()
+		if err != nil {
+			http.Error(w, "Stat failed", http.StatusInternalServerError)
+			return
+		}
+
+		filename := filepath.Base(phonePath)
+		ctype := mime.TypeByExtension(filepath.Ext(filename))
+		if ctype == "" {
+			ctype = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ctype)
+		if inline {
+			w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+		} else {
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		}
+		http.ServeContent(w, r, filename, stat.ModTime(), file)
+
+	case <-time.After(30 * time.Second):
+		http.Error(w, "Phone read timeout", http.StatusGatewayTimeout)
+	}
+}
+
+func phoneDelete(w http.ResponseWriter, r *http.Request) {
+	phonePath := r.URL.Query().Get("path")
+	if phonePath == "" {
+		var req struct {
+			Path string `json:"path"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		phonePath = req.Path
+	}
+	if phonePath == "" {
+		http.Error(w, "Path required", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := sendPhoneCommand("delete", phonePath, "", 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": resp.Success})
+}
+
+func phoneMkdir(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := sendPhoneCommand("mkdir", req.Path, "", 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": resp.Success})
+}
+
+func phoneRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Src  string `json:"src"`
+		Dest string `json:"dest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := sendPhoneCommand("rename", req.Src, req.Dest, 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": resp.Success})
+}
+
+func phoneCopyToPc(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PhonePath string `json:"phone_path"`
+		PcDest    string `json:"pc_dest"`
+		Op        string `json:"op"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	token := fmt.Sprintf("tok_%d_%d", time.Now().UnixNano(), rand.Intn(10000))
+	tokenChan := make(chan string, 1)
+
+	tokenMu.Lock()
+	tokenWaiters[token] = tokenChan
+	tokenMu.Unlock()
+
+	defer func() {
+		tokenMu.Lock()
+		delete(tokenWaiters, token)
+		tokenMu.Unlock()
+	}()
+
+	cmd := PhoneCommand{
+		ID:     fmt.Sprintf("cmd_%d", time.Now().UnixNano()),
+		Action: "read",
+		Path:   req.PhonePath,
+		Token:  token,
+	}
+
+	select {
+	case cmdQueue <- cmd:
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Phone busy", http.StatusGatewayTimeout)
+		return
+	}
+
+	select {
+	case tmpPath := <-tokenChan:
+		defer os.Remove(tmpPath)
+
+		destPath := resolvePath(req.PcDest)
+		if fi, err := os.Stat(destPath); err == nil && fi.IsDir() {
+			destPath = filepath.Join(destPath, filepath.Base(req.PhonePath))
+		}
+
+		in, err := os.Open(tmpPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer in.Close()
+
+		out, err := os.Create(destPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+
+		if _, err := io.Copy(out, in); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if req.Op == "cut" {
+			sendPhoneCommand("delete", req.PhonePath, "", 5*time.Second)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+
+	case <-time.After(30 * time.Second):
+		http.Error(w, "Phone transfer timed out", http.StatusGatewayTimeout)
+	}
+}
+
+func phoneCopyFromPc(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PcPath    string `json:"pc_path"`
+		PhoneDest string `json:"phone_dest"`
+		Op        string `json:"op"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	destFilePath := req.PhoneDest
+	filename := filepath.Base(req.PcPath)
+	if !strings.HasSuffix(destFilePath, filename) {
+		destFilePath = filepath.Join(destFilePath, filename)
+	}
+
+	resp, err := sendPhoneCommand("write_from_pc", req.PcPath, destFilePath, 30*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if req.Op == "cut" {
+		fullPcPath := resolvePath(req.PcPath)
+		moveToTrash(fullPcPath)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": resp.Success})
 }
 
 func serverInfo(w http.ResponseWriter, r *http.Request) {
@@ -547,6 +980,23 @@ func main() {
 		mux.Handle("/", http.FileServer(http.FS(subFS)))
 	}
 
+	// Serve /web/ assets (supports live disk reload and embedded fallback)
+	mux.HandleFunc("/web/", func(w http.ResponseWriter, r *http.Request) {
+		clean := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
+		candidates := []string{clean, "../" + clean, filepath.Join("server", "static", clean)}
+		for _, c := range candidates {
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				http.ServeFile(w, r, c)
+				return
+			}
+		}
+		if subFS != nil {
+			http.FileServer(http.FS(subFS)).ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+	})
+
 	// Info & Auth
 	mux.HandleFunc("/api/info", serverInfo)
 	mux.HandleFunc("/api/verify", authMiddleware(verifyAuth))
@@ -563,6 +1013,16 @@ func main() {
 	// Mobile Phone Integration
 	mux.HandleFunc("/api/phone/heartbeat", authMiddleware(phoneHeartbeat))
 	mux.HandleFunc("/api/phone/status", authMiddleware(phoneStatus))
+	mux.HandleFunc("/api/phone/poll", authMiddleware(phonePoll))
+	mux.HandleFunc("/api/phone/respond", authMiddleware(phoneRespond))
+	mux.HandleFunc("/api/phone/stream_upload", authMiddleware(phoneStreamUpload))
+	mux.HandleFunc("/api/phone/files", authMiddleware(phoneListFiles))
+	mux.HandleFunc("/api/phone/download", authMiddleware(phoneDownload))
+	mux.HandleFunc("/api/phone/delete", authMiddleware(phoneDelete))
+	mux.HandleFunc("/api/phone/mkdir", authMiddleware(phoneMkdir))
+	mux.HandleFunc("/api/phone/rename", authMiddleware(phoneRename))
+	mux.HandleFunc("/api/phone/copy_to_pc", authMiddleware(phoneCopyToPc))
+	mux.HandleFunc("/api/phone/copy_from_pc", authMiddleware(phoneCopyFromPc))
 
 	// WebDAV server (for native file manager mounting)
 	webdavHandler := &webdav.Handler{

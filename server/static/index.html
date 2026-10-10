@@ -949,6 +949,7 @@
     <div class="preview-header">
       <div class="preview-title" id="previewTitle">File Preview</div>
       <div class="preview-actions">
+        <button class="btn btn-ghost" id="previewTabBtn" onclick="openPreviewInTab()">🌐 Open in Tab</button>
         <button class="btn btn-ghost" id="previewCopyBtn" style="display:none" onclick="copyPreviewText()">Copy</button>
         <button class="btn btn-purple" id="previewDownloadBtn" onclick="downloadPreviewFile()">Download</button>
         <button class="btn-close" onclick="closePreview()">✕</button>
@@ -1066,12 +1067,7 @@
       <!-- 1. NOT CONNECTED STATE -->
       <div id="phoneNotConnectedView" class="phone-dashboard">
         <div class="phone-hero">
-          <div class="phone-hero-icon" style="background:#1f192b;border-color:rgba(239,68,68,0.3)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:32px;height:32px">
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
-              <line x1="1" y1="1" x2="23" y2="23"/>
-            </svg>
-          </div>
+          <img src="banner.png" alt="WireFM" style="max-width:320px;width:100%;height:auto;margin:0 auto 16px auto;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:block;">
           <div>
             <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:8px">
               <span class="pulse-dot offline"></span>
@@ -1084,13 +1080,13 @@
           <div class="phone-steps">
             <div class="phone-step-card">
               <div class="phone-step-num">Step 1</div>
-              <h4>Open WireFM App</h4>
-              <p>Launch the app on your phone on the same Wi-Fi network.</p>
+              <h4>Download WireFM App</h4>
+              <p>Install WireFM.apk on your Android phone.</p>
             </div>
             <div class="phone-step-card">
               <div class="phone-step-num">Step 2</div>
               <h4>Connect Your PC</h4>
-              <p>Tap "Connect Your PC" and scan the terminal QR code or enter PIN.</p>
+              <p>Tap "Connect Your PC" and scan the terminal QR code.</p>
             </div>
             <div class="phone-step-card">
               <div class="phone-step-num">Step 3</div>
@@ -1100,12 +1096,15 @@
           </div>
 
           <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
-            <button class="btn btn-purple" onclick="checkPhoneStatus(true)">
+            <a href="https://github.com/jasmin1727/WireFM/releases/latest/download/WireFM.apk" target="_blank" class="btn btn-purple" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download WireFM APK
+            </a>
+            <button class="btn btn-ghost" onclick="checkPhoneStatus(true)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               Check Connection
             </button>
             <button class="btn btn-ghost" onclick="switchDevice('pc')">Browse PC Files</button>
-            <button class="btn btn-ghost" onclick="copyWebdavUrl()">Copy WebDAV URL</button>
           </div>
         </div>
       </div>
@@ -1502,10 +1501,13 @@ function handleClick(e, path, isDir) {
     const name = path.split('/').pop();
     const ext = '.' + name.split('.').pop().toLowerCase();
     const previewable = [
-      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg',
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico',
       '.mp4', '.webm', '.mkv', '.mov',
-      '.mp3', '.wav', '.ogg', '.flac', '.m4a',
-      '.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.xml', '.log', '.yml', '.yaml'
+      '.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac',
+      '.pdf',
+      '.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.htm',
+      '.xml', '.log', '.yml', '.yaml', '.c', '.cpp', '.h', '.hpp', '.java', '.kt',
+      '.rs', '.sql', '.csv', '.toml', '.ini', '.conf', '.env'
     ];
     if (previewable.includes(ext)) {
       openPreview(path, name, ext);
@@ -1684,6 +1686,7 @@ function setView(mode) {
 // MEDIA VIEWER PREVIEW
 let currentPreviewPath = '';
 let currentPreviewText = '';
+let currentPreviewStreamUrl = '';
 
 function openPreview(path, name, ext) {
   currentPreviewPath = path;
@@ -1694,13 +1697,20 @@ function openPreview(path, name, ext) {
   const copyBtn = document.getElementById('previewCopyBtn');
   copyBtn.style.display = 'none';
   body.innerHTML = '';
+  body.style.padding = '';
 
   const streamUrl = `${getBase()}/api/download?path=${encodeURIComponent(path)}&password=${encodeURIComponent(serverPass)}&inline=1`;
+  currentPreviewStreamUrl = streamUrl;
 
-  const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+  const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'];
   const videoExts = ['.mp4', '.webm', '.mkv', '.mov'];
-  const audioExts = ['.mp3', '.wav', '.ogg', '.flac', '.m4a'];
-  const textExts = ['.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.xml', '.log', '.yml', '.yaml'];
+  const audioExts = ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac'];
+  const pdfExts = ['.pdf'];
+  const textExts = [
+    '.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.htm',
+    '.xml', '.log', '.yml', '.yaml', '.c', '.cpp', '.h', '.hpp', '.java', '.kt',
+    '.rs', '.sql', '.csv', '.toml', '.ini', '.conf', '.env'
+  ];
 
   if (imageExts.includes(ext)) {
     body.innerHTML = `<img src="${streamUrl}" alt="${esc(name)}" style="max-width:100%;max-height:75vh;border-radius:12px;object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.6);" />`;
@@ -1713,6 +1723,9 @@ function openPreview(path, name, ext) {
         <div style="font-size:15px;font-weight:600;text-align:center;word-break:break-word">${esc(name)}</div>
         <audio controls autoplay style="width:100%;margin-top:10px;"><source src="${streamUrl}">Your browser does not support audio.</audio>
       </div>`;
+  } else if (pdfExts.includes(ext)) {
+    body.style.padding = '0';
+    body.innerHTML = `<iframe src="${streamUrl}" style="width:85vw;max-width:1100px;height:78vh;border:none;background:#fff;" title="${esc(name)}"></iframe>`;
   } else if (textExts.includes(ext)) {
     body.innerHTML = '<div class="loading"><div class="spinner"></div><span style="color:var(--text-muted);font-size:13px">Loading text...</span></div>';
     fetch(streamUrl)
@@ -1725,9 +1738,23 @@ function openPreview(path, name, ext) {
       .catch(() => {
         body.innerHTML = '<div class="empty-state"><span>Failed to load text preview</span></div>';
       });
+  } else {
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px;padding:32px 20px;text-align:center;">
+        <div style="font-size:48px">📄</div>
+        <div style="font-size:16px;font-weight:600">${esc(name)}</div>
+        <p style="color:var(--text-muted);font-size:13px;max-width:360px">This file type can be opened in a new browser tab or downloaded directly.</p>
+        <button class="btn btn-purple" onclick="openPreviewInTab()">Open in Browser Tab</button>
+      </div>`;
   }
 
   modal.classList.remove('hidden');
+}
+
+function openPreviewInTab() {
+  if (currentPreviewStreamUrl) {
+    window.open(currentPreviewStreamUrl, '_blank');
+  }
 }
 
 function closePreview() {
@@ -1739,6 +1766,7 @@ function closePreview() {
     media.src = '';
   }
   body.innerHTML = '';
+  body.style.padding = '';
   modal.classList.add('hidden');
 }
 

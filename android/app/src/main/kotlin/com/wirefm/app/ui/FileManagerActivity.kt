@@ -670,7 +670,14 @@ class FileManagerActivity : AppCompatActivity() {
                     3 -> openLocalPhoneFile(File(file.path), file.ext)
                     4 -> {
                         val f = File(file.path)
-                        if (f.delete()) {
+                        val trashDir = File(Environment.getExternalStorageDirectory(), ".WireFM_Trash")
+                        if (!trashDir.exists()) trashDir.mkdirs()
+                        val trashFile = File(trashDir, "${System.currentTimeMillis()}_${f.name}")
+                        val trashed = f.renameTo(trashFile)
+                        if (trashed) {
+                            loadPhoneFiles(currentPhoneDir)
+                            toast("Moved to Recycle Bin (.WireFM_Trash)")
+                        } else if (f.delete()) {
                             loadPhoneFiles(currentPhoneDir)
                             toast("Deleted")
                         } else {

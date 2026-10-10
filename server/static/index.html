@@ -355,6 +355,104 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* MEDIA VIEWER PREVIEW MODAL */
+  .preview-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 24px;
+    width: 900px;
+    max-width: 95vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.8);
+    position: relative;
+  }
+  .preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+    gap: 12px;
+  }
+  .preview-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .preview-body {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    max-height: calc(85vh - 120px);
+  }
+  .preview-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .btn-close {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    transition: all 0.15s;
+  }
+  .btn-close:hover { background: var(--purple-dark); color: white; border-color: var(--purple); }
+
+  /* DRAG AND DROP OVERLAY */
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 15, 19, 0.88);
+    backdrop-filter: blur(8px);
+    z-index: 5000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 3px dashed var(--purple);
+    margin: 12px;
+    border-radius: 20px;
+    pointer-events: none;
+  }
+  .drop-overlay.active {
+    display: flex;
+  }
+  .drop-content {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .drop-content svg {
+    width: 64px;
+    height: 64px;
+    color: var(--purple-light);
+    animation: bounce 1s infinite alternate;
+  }
+  @keyframes bounce {
+    from { transform: translateY(0); }
+    to { transform: translateY(-10px); }
+  }
 </style>
 </head>
 <body>
@@ -383,6 +481,33 @@
     <p style="margin-top:12px;margin-bottom:0;text-align:center;font-size:12px">
       Or scan QR code with your phone camera app
     </p>
+<!-- Drag and Drop Overlay -->
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-content">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <h2 style="font-size:22px;color:var(--text)">Drop files to upload</h2>
+    <p style="color:var(--muted);font-size:14px" id="dropFolderTarget">Upload directly to current folder</p>
+  </div>
+</div>
+
+<!-- Media Viewer / Preview Modal -->
+<div class="modal-overlay hidden" id="previewModal">
+  <div class="preview-modal">
+    <div class="preview-header">
+      <div class="preview-title" id="previewTitle">File Preview</div>
+      <div class="preview-actions">
+        <button class="btn btn-ghost" id="previewCopyBtn" style="display:none" onclick="copyPreviewText()">Copy</button>
+        <button class="btn btn-purple" id="previewDownloadBtn" onclick="downloadPreviewFile()">Download</button>
+        <button class="btn-close" onclick="closePreview()">✕</button>
+      </div>
+    </div>
+    <div class="preview-body" id="previewBody">
+      <!-- Injected preview -->
+    </div>
   </div>
 </div>
 
@@ -472,6 +597,10 @@
   <div class="ctx-item" onclick="ctxOpen()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     Open
+  </div>
+  <div class="ctx-item" onclick="ctxPreview()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    Preview
   </div>
   <div class="ctx-item" onclick="ctxDownload()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
@@ -667,9 +796,167 @@ function renderFiles(files) {
 }
 
 function handleClick(e, path, isDir) {
-  if (isDir) { loadFiles(path); }
-  else { selectedFile = path; showCtx(e, path, isDir, path.split('/').pop()); }
+  if (isDir) {
+    loadFiles(path);
+  } else {
+    selectedFile = path;
+    const name = path.split('/').pop();
+    const ext = '.' + name.split('.').pop().toLowerCase();
+    const previewable = [
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg',
+      '.mp4', '.webm', '.mkv', '.mov',
+      '.mp3', '.wav', '.ogg', '.flac', '.m4a',
+      '.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.xml', '.log', '.yml', '.yaml'
+    ];
+    if (previewable.includes(ext)) {
+      openPreview(path, name, ext);
+    } else {
+      showCtx(e, path, isDir, name);
+    }
+  }
 }
+
+// MEDIA VIEWER PREVIEW
+let currentPreviewPath = '';
+let currentPreviewText = '';
+
+function openPreview(path, name, ext) {
+  currentPreviewPath = path;
+  currentPreviewText = '';
+  document.getElementById('previewTitle').textContent = name;
+  const modal = document.getElementById('previewModal');
+  const body = document.getElementById('previewBody');
+  const copyBtn = document.getElementById('previewCopyBtn');
+  copyBtn.style.display = 'none';
+  body.innerHTML = '';
+
+  const streamUrl = `${getBase()}/api/download?path=${encodeURIComponent(path)}&password=${encodeURIComponent(serverPass)}&inline=1`;
+
+  const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+  const videoExts = ['.mp4', '.webm', '.mkv', '.mov'];
+  const audioExts = ['.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+  const textExts = ['.txt', '.md', '.json', '.js', '.ts', '.py', '.go', '.sh', '.css', '.html', '.xml', '.log', '.yml', '.yaml'];
+
+  if (imageExts.includes(ext)) {
+    body.innerHTML = `<img src="${streamUrl}" alt="${esc(name)}" style="max-width:100%;max-height:75vh;border-radius:12px;object-fit:contain;box-shadow:0 8px 30px rgba(0,0,0,0.6);" />`;
+  } else if (videoExts.includes(ext)) {
+    body.innerHTML = `<video controls autoplay playsinline style="max-width:100%;max-height:75vh;border-radius:12px;outline:none;background:#000;"><source src="${streamUrl}">Your browser does not support video playback.</video>`;
+  } else if (audioExts.includes(ext)) {
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:30px 20px;width:100%;max-width:480px;background:var(--card);border:1px solid var(--border);border-radius:16px;">
+        <div style="font-size:56px">🎵</div>
+        <div style="font-size:16px;font-weight:600;text-align:center;word-break:break-word">${esc(name)}</div>
+        <audio controls autoplay style="width:100%;margin-top:10px;"><source src="${streamUrl}">Your browser does not support audio playback.</audio>
+      </div>`;
+  } else if (textExts.includes(ext)) {
+    body.innerHTML = '<div class="loading"><div class="spinner"></div><span style="color:var(--muted);font-size:13px">Loading file contents...</span></div>';
+    fetch(streamUrl)
+      .then(r => r.text())
+      .then(txt => {
+        currentPreviewText = txt;
+        copyBtn.style.display = 'inline-flex';
+        body.innerHTML = `<pre style="width:100%;max-height:72vh;overflow:auto;background:#15151e;padding:18px;border-radius:12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;color:#d8cffc;line-height:1.6;white-space:pre-wrap;word-break:break-word;border:1px solid var(--border);">${esc(txt)}</pre>`;
+      })
+      .catch(() => {
+        body.innerHTML = '<div class="empty-state"><span>Failed to load text preview</span></div>';
+      });
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closePreview() {
+  const modal = document.getElementById('previewModal');
+  const body = document.getElementById('previewBody');
+  const media = body.querySelector('video, audio');
+  if (media) {
+    media.pause();
+    media.src = '';
+  }
+  body.innerHTML = '';
+  modal.classList.add('hidden');
+}
+
+function downloadPreviewFile() {
+  if (currentPreviewPath) {
+    window.open(`${getBase()}/api/download?path=${encodeURIComponent(currentPreviewPath)}&password=${encodeURIComponent(serverPass)}`);
+  }
+}
+
+function copyPreviewText() {
+  if (currentPreviewText) {
+    navigator.clipboard.writeText(currentPreviewText);
+    toast('Copied to clipboard!', 'success');
+  }
+}
+
+function ctxPreview() {
+  if (ctxFile) {
+    const ext = '.' + ctxName.split('.').pop().toLowerCase();
+    openPreview(ctxFile, ctxName, ext);
+  }
+}
+
+// BATCH UPLOAD FUNCTION
+async function uploadFilesList(files) {
+  if (!files || files.length === 0) return;
+  toast(`Uploading ${files.length} file(s)...`);
+
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append('files', files[i]);
+  }
+
+  try {
+    const res = await fetch(`${getBase()}/api/upload?path=${encodeURIComponent(currentPath)}&password=${encodeURIComponent(serverPass)}`, {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (data.error) {
+      toast(`Upload error: ${data.error}`, 'error');
+    } else {
+      toast(`Uploaded ${files.length} item(s)!`, 'success');
+      loadFiles(currentPath);
+    }
+  } catch (err) {
+    toast('Upload failed. Check server connection.', 'error');
+  }
+}
+
+// DRAG AND DROP HANDLERS
+window.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  document.getElementById('dropOverlay').classList.add('active');
+  const folderName = currentPath.split('/').pop() || 'Root';
+  document.getElementById('dropFolderTarget').textContent = `Target: ${folderName}`;
+});
+
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+});
+
+window.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) {
+    document.getElementById('dropOverlay').classList.remove('active');
+  }
+});
+
+window.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  document.getElementById('dropOverlay').classList.remove('active');
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    await uploadFilesList(e.dataTransfer.files);
+  }
+});
+
+// ESC KEY CLOSE
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closePreview();
+    document.getElementById('connectModal').classList.add('hidden');
+  }
+});
 
 function filterFiles() { renderFiles(allFiles); }
 function setView(mode) {
@@ -737,14 +1024,7 @@ async function ctxRename() {
 // UPLOAD
 function showUpload() { document.getElementById('uploadInput').click(); }
 async function handleUpload(input) {
-  for (const file of input.files) {
-    const fd = new FormData();
-    fd.append('file', file);
-    const res = await fetch(`${getBase()}/api/upload?path=${encodeURIComponent(currentPath)}&password=${encodeURIComponent(serverPass)}`, { method: 'POST', body: fd });
-    const data = await res.json();
-    toast(`Uploaded: ${file.name}`);
-  }
-  loadFiles(currentPath);
+  await uploadFilesList(input.files);
   input.value = '';
 }
 

@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/webdav"
 	"embed"
 	"io/fs"
+	"mime"
 )
 
 //go:embed static/*
@@ -166,8 +167,18 @@ func downloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
-	w.Header().Set("Content-Type", "application/octet-stream")
+	inline := r.URL.Query().Get("inline") == "1" || r.URL.Query().Get("inline") == "true"
+	if inline {
+		w.Header().Set("Content-Disposition", "inline; filename="+filepath.Base(cleanPath))
+		ext := strings.ToLower(filepath.Ext(cleanPath))
+		ctype := mime.TypeByExtension(ext)
+		if ctype != "" {
+			w.Header().Set("Content-Type", ctype)
+		}
+	} else {
+		w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
 	http.ServeFile(w, r, cleanPath)
 }
 
@@ -177,27 +188,48 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		destPath = serveRoot
 	}
 
-	r.ParseMultipartForm(500 << 20) // 500MB max
-	file, handler, err := r.FormFile("file")
+	err := r.ParseMultipartForm(1024 << 20) // 1GB max
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	defer file.Close()
 
-	destFile := filepath.Join(filepath.Clean(destPath), handler.Filename)
-	out, err := os.Create(destFile)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	cleanDestDir := filepath.Clean(destPath)
+	var uploaded []string
+
+	if r.MultipartForm != nil && r.MultipartForm.File != nil {
+		for _, fileHeaders := range r.MultipartForm.File {
+			for _, fileHeader := range fileHeaders {
+				file, err := fileHeader.Open()
+				if err != nil {
+					continue
+				}
+				destFile := filepath.Join(cleanDestDir, filepath.Base(fileHeader.Filename))
+				out, err := os.Create(destFile)
+				if err != nil {
+					file.Close()
+					continue
+				}
+				io.Copy(out, file)
+				out.Close()
+				file.Close()
+				uploaded = append(uploaded, destFile)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if len(uploaded) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "No file uploaded"})
 		return
 	}
-	defer out.Close()
-
-	io.Copy(out, file)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"success": "File uploaded", "path": destFile})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": "Uploaded",
+		"count":   len(uploaded),
+		"files":   uploaded,
+	})
 }
 
 func deleteFile(w http.ResponseWriter, r *http.Request) {

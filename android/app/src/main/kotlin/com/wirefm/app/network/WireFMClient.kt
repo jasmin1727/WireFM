@@ -6,17 +6,20 @@ import com.wirefm.app.model.FileItem
 import com.wirefm.app.model.ServerInfo
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 object WireFMClient {
 
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private fun getRequest(ip: String, port: String, pass: String, path: String): Request {
@@ -48,15 +51,51 @@ object WireFMClient {
         } catch (e: Exception) { null }
     }
 
-    fun downloadFile(ip: String, port: String, pass: String, path: String, destDir: File): Boolean {
+    fun downloadFile(ip: String, port: String, pass: String, path: String, destDir: File): File? {
         return try {
+            destDir.mkdirs()
             val req = getRequest(ip, port, pass, "/api/download?path=${encode(path)}")
             val res = client.newCall(req).execute()
-            val file = File(destDir, path.substringAfterLast("/"))
+            if (!res.isSuccessful) return null
+            val fileName = path.substringAfterLast("/")
+            val file = File(destDir, fileName)
             res.body?.byteStream()?.use { input ->
                 file.outputStream().use { output -> input.copyTo(output) }
             }
-            true
+            file
+        } catch (e: Exception) { null }
+    }
+
+    fun uploadFile(ip: String, port: String, pass: String, targetDirPath: String, file: File): Boolean {
+        return try {
+            val mediaType = "application/octet-stream".toMediaType()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", file.name, file.asRequestBody(mediaType))
+                .build()
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/upload?path=${encode(targetDirPath)}&password=${encode(pass)}")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    fun uploadStream(ip: String, port: String, pass: String, targetDirPath: String, fileName: String, inputStream: InputStream): Boolean {
+        return try {
+            val bytes = inputStream.readBytes()
+            val mediaType = "application/octet-stream".toMediaType()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", fileName, bytes.toRequestBody(mediaType))
+                .build()
+            val req = Request.Builder()
+                .url("http://$ip:$port/api/upload?path=${encode(targetDirPath)}&password=${encode(pass)}")
+                .header("X-Password", pass)
+                .post(body)
+                .build()
+            client.newCall(req).execute().isSuccessful
         } catch (e: Exception) { false }
     }
 

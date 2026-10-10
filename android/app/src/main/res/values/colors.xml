@@ -10,4 +10,5 @@
     <color name="text_dark">#2B244D</color>
     <color name="accent_green">#4ECCA3</color>
     <color name="danger_red">#FF6B6B</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

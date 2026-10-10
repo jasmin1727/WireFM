@@ -22,8 +22,8 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const (
-	Port     = "8080"
+var (
+	Port       = "8080"
 	WebDAVPort = "8081"
 )
 
@@ -101,14 +101,21 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func resolvePath(p string) string {
+	if p == "" || p == "~" {
+		return serveRoot
+	}
+	if strings.HasPrefix(p, "~/") {
+		p = filepath.Join(serveRoot, strings.TrimPrefix(p, "~/"))
+	} else if strings.HasPrefix(p, "~\\") {
+		p = filepath.Join(serveRoot, strings.TrimPrefix(p, "~\\"))
+	}
+	return filepath.Clean(p)
+}
+
 func listFiles(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
-	if path == "" {
-		path = serveRoot
-	}
-
-	// Security: prevent path traversal
-	cleanPath := filepath.Clean(path)
+	cleanPath := resolvePath(path)
 
 	entries, err := os.ReadDir(cleanPath)
 	if err != nil {
@@ -156,7 +163,7 @@ func downloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := filepath.Clean(path)
+	cleanPath := resolvePath(path)
 	info, err := os.Stat(cleanPath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
@@ -184,9 +191,7 @@ func downloadFile(w http.ResponseWriter, r *http.Request) {
 
 func uploadFile(w http.ResponseWriter, r *http.Request) {
 	destPath := r.URL.Query().Get("path")
-	if destPath == "" {
-		destPath = serveRoot
-	}
+	cleanDestDir := resolvePath(destPath)
 
 	err := r.ParseMultipartForm(1024 << 20) // 1GB max
 	if err != nil {
@@ -195,7 +200,6 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanDestDir := filepath.Clean(destPath)
 	var uploaded []string
 
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
@@ -240,7 +244,7 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := filepath.Clean(path)
+	cleanPath := resolvePath(path)
 	err := os.RemoveAll(cleanPath)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -258,8 +262,8 @@ func copyFile(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	src := filepath.Clean(req.Src)
-	dest := filepath.Clean(req.Dest)
+	src := resolvePath(req.Src)
+	dest := resolvePath(req.Dest)
 
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -290,8 +294,8 @@ func moveFile(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	src := filepath.Clean(req.Src)
-	dest := filepath.Clean(req.Dest)
+	src := resolvePath(req.Src)
+	dest := resolvePath(req.Dest)
 
 	err := os.Rename(src, dest)
 	if err != nil {
@@ -309,7 +313,7 @@ func createFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	cleanPath := filepath.Clean(req.Path)
+	cleanPath := resolvePath(req.Path)
 	err := os.MkdirAll(cleanPath, 0755)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -318,6 +322,19 @@ func createFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"success": "Folder created"})
+}
+
+func verifyAuth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"authenticated": true,
+		"user":          os.Getenv("USER"),
+		"hostname":      getHostname(),
+		"root":          serveRoot,
+		"os":            runtime.GOOS,
+		"version":       "1.0.0",
+	})
 }
 
 func serverInfo(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +407,13 @@ func printBanner(ip string) {
 }
 
 func main() {
+	if p := os.Getenv("PORT"); p != "" {
+		Port = p
+	}
+	if wp := os.Getenv("WEBDAV_PORT"); wp != "" {
+		WebDAVPort = wp
+	}
+
 	// Setup
 	if len(os.Args) > 1 {
 		serveRoot = os.Args[1]
@@ -426,8 +450,9 @@ func main() {
 		mux.Handle("/", http.FileServer(http.FS(subFS)))
 	}
 
-	// Info (no auth needed for initial handshake)
+	// Info & Auth
 	mux.HandleFunc("/api/info", serverInfo)
+	mux.HandleFunc("/api/verify", authMiddleware(verifyAuth))
 
 	// File operations (auth required)
 	mux.HandleFunc("/api/files", authMiddleware(listFiles))

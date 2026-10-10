@@ -101,7 +101,9 @@ class ConnectActivity : AppCompatActivity() {
         if (result != null && result.contents != null) {
             // Parse: http://IP:PORT?password=PASS
             try {
-                val url = java.net.URL(result.contents)
+                val raw = result.contents.trim()
+                val fullUrl = if (!raw.startsWith("http://") && !raw.startsWith("https://")) "http://$raw" else raw
+                val url = java.net.URL(fullUrl)
                 val ip = url.host
                 val port = if (url.port > 0) url.port.toString() else "8080"
                 val pass = url.query?.substringAfter("password=") ?: ""

@@ -17,6 +17,7 @@ import (
 	"embed"
 	"io/fs"
 	"mime"
+	"sync"
 )
 
 //go:embed static/*
@@ -337,6 +338,66 @@ func verifyAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type PhoneFile struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	Ext     string `json:"ext"`
+	ModTime string `json:"mod_time,omitempty"`
+}
+
+type PhoneState struct {
+	Connected   bool        `json:"connected"`
+	DeviceName  string      `json:"device_name"`
+	IP          string      `json:"ip"`
+	LastSeen    time.Time   `json:"last_seen"`
+	CurrentPath string      `json:"current_path"`
+	Files       []PhoneFile `json:"files"`
+}
+
+var (
+	phoneMu    sync.Mutex
+	phoneState PhoneState
+)
+
+func phoneHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DeviceName  string      `json:"device_name"`
+		CurrentPath string      `json:"current_path"`
+		Files       []PhoneFile `json:"files"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	phoneMu.Lock()
+	phoneState.Connected = true
+	phoneState.DeviceName = req.DeviceName
+	phoneState.IP = r.RemoteAddr
+	phoneState.LastSeen = time.Now()
+	phoneState.CurrentPath = req.CurrentPath
+	phoneState.Files = req.Files
+	phoneMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "connected": true})
+}
+
+func phoneStatus(w http.ResponseWriter, r *http.Request) {
+	phoneMu.Lock()
+	defer phoneMu.Unlock()
+
+	if time.Since(phoneState.LastSeen) > 35*time.Second {
+		phoneState.Connected = false
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(phoneState)
+}
+
 func serverInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
@@ -462,6 +523,10 @@ func main() {
 	mux.HandleFunc("/api/copy", authMiddleware(copyFile))
 	mux.HandleFunc("/api/move", authMiddleware(moveFile))
 	mux.HandleFunc("/api/mkdir", authMiddleware(createFolder))
+
+	// Mobile Phone Integration
+	mux.HandleFunc("/api/phone/heartbeat", authMiddleware(phoneHeartbeat))
+	mux.HandleFunc("/api/phone/status", authMiddleware(phoneStatus))
 
 	// WebDAV server (for native file manager mounting)
 	webdavHandler := &webdav.Handler{

@@ -564,6 +564,64 @@
     line-height: 1.4;
   }
 
+  /* PHONE STATUS & FILES STYLES */
+  .phone-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+  }
+  .phone-device-tag {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .phone-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .phone-badge-offline {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .pulse-dot.online {
+    background: var(--success);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+    animation: dotPulse 1.8s infinite;
+  }
+  .pulse-dot.offline {
+    background: var(--danger);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+  }
+  @keyframes dotPulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+    70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  }
+
   /* CONTEXT MENU */
   .context-menu {
     position: fixed;
@@ -1003,39 +1061,69 @@
       <div id="fileGrid" class="files-grid"></div>
     </div>
 
-    <!-- PHONE APP DASHBOARD VIEW -->
+    <!-- PHONE VIEW -->
     <div class="files-container" id="phoneContainer" style="display:none">
-      <div class="phone-dashboard">
+      <!-- 1. NOT CONNECTED STATE -->
+      <div id="phoneNotConnectedView" class="phone-dashboard">
         <div class="phone-hero">
-          <div class="phone-hero-icon">
-            <img src="logo.png" alt="WireFM">
+          <div class="phone-hero-icon" style="background:#1f192b;border-color:rgba(239,68,68,0.3)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:32px;height:32px">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
           </div>
-          <h2>WireFM Mobile Integration</h2>
-          <p>Wirelessly connect your Android phone to transfer files, browse storage bidirectionally, and mount as a local system drive.</p>
+          <div>
+            <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:8px">
+              <span class="pulse-dot offline"></span>
+              <span class="phone-badge phone-badge-offline">Not Connected</span>
+            </div>
+            <h2>Mobile Device Not Connected</h2>
+          </div>
+          <p>Open the WireFM app on your Android phone and connect to this PC. Once connected, your phone's storage and files will appear here automatically.</p>
           
           <div class="phone-steps">
             <div class="phone-step-card">
               <div class="phone-step-num">Step 1</div>
-              <h4>Open Android App</h4>
-              <p>Launch WireFM on your phone connected to the same Wi-Fi.</p>
+              <h4>Open WireFM App</h4>
+              <p>Launch the app on your phone on the same Wi-Fi network.</p>
             </div>
             <div class="phone-step-card">
               <div class="phone-step-num">Step 2</div>
-              <h4>Scan QR Code</h4>
-              <p>Tap "Connect Your PC" and scan the QR displayed in your PC terminal.</p>
+              <h4>Connect Your PC</h4>
+              <p>Tap "Connect Your PC" and scan the terminal QR code or enter PIN.</p>
             </div>
             <div class="phone-step-card">
               <div class="phone-step-num">Step 3</div>
-              <h4>Manage & Transfer</h4>
-              <p>Copy, cut, paste, upload, and download files directly between PC and phone.</p>
+              <h4>Browse & Transfer</h4>
+              <p>Your mobile files and folders will show up here in real time.</p>
             </div>
           </div>
 
-          <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
-            <button class="btn btn-purple" onclick="switchDevice('pc')">Browse PC Files</button>
+          <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+            <button class="btn btn-purple" onclick="checkPhoneStatus(true)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Check Connection
+            </button>
+            <button class="btn btn-ghost" onclick="switchDevice('pc')">Browse PC Files</button>
             <button class="btn btn-ghost" onclick="copyWebdavUrl()">Copy WebDAV URL</button>
           </div>
         </div>
+      </div>
+
+      <!-- 2. CONNECTED PHONE STORAGE VIEW -->
+      <div id="phoneConnectedView" style="display:none">
+        <div class="phone-header-bar">
+          <div class="phone-device-tag">
+            <span class="pulse-dot online"></span>
+            <span id="phoneDeviceName">Android Phone</span>
+            <span class="phone-badge">Online</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:12px;color:var(--text-muted)" id="phoneStoragePath">Internal Storage</span>
+            <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" onclick="checkPhoneStatus(true)">Refresh</button>
+          </div>
+        </div>
+        <div id="phoneFileGrid" class="files-grid"></div>
       </div>
     </div>
   </div>
@@ -1471,12 +1559,19 @@ function navigate(type) {
   loadFiles(targetPath);
 }
 
-// DEVICE SWITCHING
+// DEVICE SWITCHING & PHONE STATUS
+let phonePollInterval = null;
+
 function switchDevice(device) {
   currentDevice = device;
   const filesContainer = document.getElementById('filesContainer');
   const phoneContainer = document.getElementById('phoneContainer');
   const mainToolbar = document.getElementById('mainToolbar');
+
+  if (phonePollInterval) {
+    clearInterval(phonePollInterval);
+    phonePollInterval = null;
+  }
 
   if (device === 'pc') {
     setSidebarActive('nav-pc');
@@ -1490,9 +1585,72 @@ function switchDevice(device) {
     filesContainer.style.display = 'none';
     phoneContainer.style.display = 'block';
     mainToolbar.style.display = 'none';
-    document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Phone Integration</div>`;
-    document.getElementById('statusInfo').textContent = 'Phone Mode';
+    document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Checking Phone...</div>`;
+    checkPhoneStatus();
+    phonePollInterval = setInterval(() => {
+      if (currentDevice === 'phone') checkPhoneStatus();
+    }, 4000);
   }
+}
+
+async function checkPhoneStatus(manual = false) {
+  try {
+    const res = await fetch(`${getBase()}/api/phone/status`, {
+      headers: { 'X-Password': serverPass }
+    });
+    if (!res.ok) throw new Error('Status fetch failed');
+    const data = await res.json();
+
+    const notConnected = document.getElementById('phoneNotConnectedView');
+    const connected = document.getElementById('phoneConnectedView');
+
+    if (!data.connected) {
+      notConnected.style.display = 'block';
+      connected.style.display = 'none';
+      document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Phone / Not Connected</div>`;
+      document.getElementById('statusInfo').textContent = 'Phone: Not Connected';
+      if (manual) toast('Mobile device is not connected yet.', 'info');
+    } else {
+      notConnected.style.display = 'none';
+      connected.style.display = 'block';
+
+      const devName = data.device_name || 'Android Device';
+      document.getElementById('phoneDeviceName').textContent = devName;
+      document.getElementById('phoneStoragePath').textContent = data.current_path || 'Internal Storage';
+      document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 ${esc(devName)} / Storage</div>`;
+      document.getElementById('statusInfo').textContent = `Phone: ${(data.files || []).length} items`;
+
+      renderPhoneFiles(data.files || []);
+      if (manual) toast(`Connected to ${devName}!`, 'success');
+    }
+  } catch (e) {
+    document.getElementById('phoneNotConnectedView').style.display = 'block';
+    document.getElementById('phoneConnectedView').style.display = 'none';
+  }
+}
+
+function renderPhoneFiles(files) {
+  const grid = document.getElementById('phoneFileGrid');
+  if (!files || files.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1">
+        <div class="empty-icon">📂</div>
+        <span>Phone connected! No files indexed yet or storage permission pending. Tap Internal Storage in the mobile app.</span>
+      </div>
+    `;
+    return;
+  }
+
+  // Sort folders first
+  files.sort((a, b) => b.is_dir - a.is_dir || a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  grid.innerHTML = files.map(f => `
+    <div class="file-card" onclick="toast('Phone file: ${escJ(f.name)}')">
+      <div class="file-icon">${getIcon(f)}</div>
+      <div class="file-name" title="${esc(f.name)}">${esc(f.name)}</div>
+      <div class="file-size">${f.is_dir ? 'Folder' : formatSize(f.size)}</div>
+    </div>
+  `).join('');
 }
 
 function copyWebdavUrl() {

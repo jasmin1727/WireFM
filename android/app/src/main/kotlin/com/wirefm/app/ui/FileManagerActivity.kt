@@ -172,6 +172,9 @@ class FileManagerActivity : AppCompatActivity() {
 
         updateTabStyles()
         updateClipboardUI()
+        if (!checkStoragePermission()) {
+            requestStoragePermission()
+        }
         navigateToPc(root)
     }
 
@@ -183,12 +186,21 @@ class FileManagerActivity : AppCompatActivity() {
         if (isPhoneStorage && checkStoragePermission()) {
             loadPhoneFiles(currentPhoneDir)
         }
-        startHeartbeat()
-        startPhoneWorker()
+        if (heartbeatJob == null || !heartbeatJob!!.isActive) {
+            startHeartbeat()
+        }
+        if (phoneWorkerJob == null || !phoneWorkerJob!!.isActive) {
+            startPhoneWorker()
+        }
     }
 
     override fun onPause() {
         super.onPause()
+        // Retain background worker & heartbeat so PC Web UI stays connected even when screen turns off or locks
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
         heartbeatJob?.cancel()
         phoneWorkerJob?.cancel()
     }
@@ -240,9 +252,16 @@ class FileManagerActivity : AppCompatActivity() {
             try {
                 when (cmd.action) {
                     "list" -> {
-                        val dir = File(cmd.path)
-                        val files = if (dir.exists() && dir.isDirectory) {
-                            dir.listFiles()?.map { f ->
+                        val targetPath = if (cmd.path.isBlank() || cmd.path == "/" || cmd.path == "~") {
+                            Environment.getExternalStorageDirectory()?.absolutePath ?: "/storage/emulated/0"
+                        } else {
+                            cmd.path
+                        }
+                        val dir = File(targetPath)
+                        if (!checkStoragePermission()) {
+                            WireFMClient.respondPhoneError(ip, port, pass, cmd.id, "Storage permission not granted on phone")
+                        } else if (dir.exists() && dir.isDirectory) {
+                            val files = dir.listFiles()?.map { f ->
                                 mapOf<String, Any>(
                                     "name" to f.name,
                                     "path" to f.absolutePath,
@@ -250,9 +269,11 @@ class FileManagerActivity : AppCompatActivity() {
                                     "size" to if (f.isDirectory) 0L else f.length(),
                                     "ext" to if (f.isDirectory) "" else "." + f.extension.lowercase(java.util.Locale.getDefault())
                                 )
-                            } ?: emptyList()
-                        } else emptyList()
-                        WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, true, files)
+                            }?.sortedWith(compareByDescending<Map<String, Any>> { it["is_dir"] as Boolean }.thenBy { (it["name"] as String).lowercase(java.util.Locale.getDefault()) }) ?: emptyList()
+                            WireFMClient.respondPhoneCommand(ip, port, pass, cmd.id, true, files)
+                        } else {
+                            WireFMClient.respondPhoneError(ip, port, pass, cmd.id, "Folder does not exist: $targetPath")
+                        }
                     }
                     "read" -> {
                         val file = File(cmd.path)

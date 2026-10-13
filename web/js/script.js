@@ -371,6 +371,21 @@ function navUp() {
 }
 
 function navigate(type) {
+  if (currentDevice === 'phone') {
+    const phoneMap = {
+      home: '/storage/emulated/0',
+      downloads: '/storage/emulated/0/Download',
+      pictures: '/storage/emulated/0/DCIM',
+      documents: '/storage/emulated/0/Documents',
+      videos: '/storage/emulated/0/Movies',
+      music: '/storage/emulated/0/Music'
+    };
+    const target = phoneMap[type] || '/storage/emulated/0';
+    setSidebarActive('nav-' + type);
+    loadPhoneDir(target);
+    return;
+  }
+
   if (!serverUserRoot) serverUserRoot = '/';
   const cleanRoot = serverUserRoot.replace(/\/+$/, '');
 
@@ -406,14 +421,14 @@ function switchDevice(device) {
     setSidebarActive('nav-pc');
     filesContainer.style.display = 'block';
     phoneContainer.style.display = 'none';
-    mainToolbar.style.display = 'flex';
+    if (mainToolbar) mainToolbar.style.display = 'flex';
     if (!currentPath) currentPath = serverUserRoot || '/';
     loadFiles(currentPath);
   } else {
     setSidebarActive('nav-phone');
     filesContainer.style.display = 'none';
     phoneContainer.style.display = 'block';
-    mainToolbar.style.display = 'none';
+    if (mainToolbar) mainToolbar.style.display = isPhoneConnected ? 'flex' : 'none';
     document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Checking Phone...</div>`;
     checkPhoneStatus();
     phonePollInterval = setInterval(() => {
@@ -435,11 +450,13 @@ async function checkPhoneStatus(manual = false) {
 
     const notConnected = document.getElementById('phoneNotConnectedView');
     const connected = document.getElementById('phoneConnectedView');
+    const mainToolbar = document.getElementById('mainToolbar');
 
     if (!data.connected) {
       isPhoneConnected = false;
       notConnected.style.display = 'block';
       connected.style.display = 'none';
+      if (mainToolbar && currentDevice === 'phone') mainToolbar.style.display = 'none';
       document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Phone / Not Connected</div>`;
       document.getElementById('statusInfo').textContent = 'Phone: Not Connected';
       if (manual) toast('Mobile device is not connected yet.', 'info');
@@ -447,13 +464,14 @@ async function checkPhoneStatus(manual = false) {
       isPhoneConnected = true;
       notConnected.style.display = 'none';
       connected.style.display = 'block';
+      if (mainToolbar) mainToolbar.style.display = 'flex';
 
       const devName = data.device_name || 'Android Device';
       document.getElementById('phoneDeviceName').textContent = devName;
       document.getElementById('phoneStoragePath').textContent = currentPhonePath;
 
       if (!allPhoneFiles || allPhoneFiles.length === 0) {
-        if (data.files && data.files.length > 0) {
+        if (data.files && data.files.length > 0 && currentPhonePath === '/storage/emulated/0') {
           allPhoneFiles = data.files;
           renderPhoneFiles(allPhoneFiles);
         } else {
@@ -468,6 +486,8 @@ async function checkPhoneStatus(manual = false) {
     isPhoneConnected = false;
     document.getElementById('phoneNotConnectedView').style.display = 'block';
     document.getElementById('phoneConnectedView').style.display = 'none';
+    const mainToolbar = document.getElementById('mainToolbar');
+    if (mainToolbar && currentDevice === 'phone') mainToolbar.style.display = 'none';
   }
 }
 
@@ -482,21 +502,36 @@ async function loadPhoneDir(path) {
     const res = await fetch(`${getBase()}/api/phone/files?path=${encodeURIComponent(path)}`, {
       headers: { 'X-Password': serverPass }
     });
-    if (!res.ok) throw new Error('Failed to load phone directory');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Server responded with ${res.status}`);
+    }
     const data = await res.json();
     allPhoneFiles = data.files || [];
     renderPhoneFiles(allPhoneFiles);
     document.getElementById('statusInfo').textContent = `Phone: ${allPhoneFiles.length} items`;
   } catch (e) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1"><span>Could not load folder: ${esc(path)}</span></div>`;
-    toast('Error reading phone folder', 'error');
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1">
+        <div class="empty-icon">📂</div>
+        <span>Could not open folder: ${esc(path)}</span>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${esc(e.message)}</div>
+        <button class="btn btn-ghost" style="margin-top:12px" onclick="loadPhoneDir('/storage/emulated/0')">Go to Storage Root</button>
+      </div>
+    `;
+    toast('Error opening phone folder: ' + e.message, 'error');
   }
 }
 
 function updatePhoneBreadcrumb(path) {
   const el = document.getElementById('breadcrumb');
-  const devName = document.getElementById('phoneDeviceName').textContent || 'Android Phone';
+  const btnUp = document.getElementById('btnNavUp');
+  const devName = document.getElementById('phoneDeviceName')?.textContent || 'Android Phone';
   
+  if (btnUp) {
+    btnUp.disabled = (!path || path === '/storage/emulated/0' || path === '/storage');
+  }
+
   let html = `<div class="breadcrumb-item" onclick="loadPhoneDir('/storage/emulated/0')" title="Phone Storage">📱 ${esc(devName)} / Storage</div>`;
   
   const subparts = path.replace(/^\/storage\/emulated\/0\/?/, '').split('/').filter(Boolean);
@@ -721,6 +756,10 @@ function copyPreviewText() {
 // CONTEXT MENU
 let ctxFile = null, ctxIsDir = false, ctxName = '', ctxDevice = 'pc';
 
+function closeCtxMenu() {
+  document.getElementById('contextMenu')?.classList.remove('show');
+}
+
 function showCtx(e, path, isDir, name, device = 'pc') {
   e.preventDefault();
   e.stopPropagation();
@@ -730,6 +769,7 @@ function showCtx(e, path, isDir, name, device = 'pc') {
   ctxDevice = device;
 
   const m = document.getElementById('contextMenu');
+  if (!m) return;
   document.getElementById('ctxOpenItem').style.display = 'flex';
   document.getElementById('ctxPreviewItem').style.display = isDir ? 'none' : 'flex';
   document.getElementById('ctxDownloadItem').style.display = isDir ? 'none' : 'flex';
@@ -750,8 +790,12 @@ function showCtx(e, path, isDir, name, device = 'pc') {
   pasteBtn.style.opacity = clipboard ? '1' : '0.4';
   pasteBtn.style.pointerEvents = clipboard ? 'auto' : 'none';
 
-  m.style.left = Math.min(e.clientX, window.innerWidth - 210) + 'px';
-  m.style.top = Math.min(e.clientY, window.innerHeight - 340) + 'px';
+  const menuWidth = 200;
+  const menuHeight = isDir ? 320 : 280;
+  const posX = Math.max(10, Math.min(e.clientX, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(e.clientY, window.innerHeight - menuHeight - 10));
+  m.style.left = posX + 'px';
+  m.style.top = posY + 'px';
   m.classList.add('show');
 }
 
@@ -764,6 +808,7 @@ function showEmptyCtx(e, device = 'pc') {
   ctxDevice = device || currentDevice;
 
   const m = document.getElementById('contextMenu');
+  if (!m) return;
   document.getElementById('ctxOpenItem').style.display = 'none';
   document.getElementById('ctxPreviewItem').style.display = 'none';
   document.getElementById('ctxDownloadItem').style.display = 'none';
@@ -784,42 +829,45 @@ function showEmptyCtx(e, device = 'pc') {
   pasteBtn.style.opacity = clipboard ? '1' : '0.4';
   pasteBtn.style.pointerEvents = clipboard ? 'auto' : 'none';
 
-  m.style.left = Math.min(e.clientX, window.innerWidth - 210) + 'px';
-  m.style.top = Math.min(e.clientY, window.innerHeight - 240) + 'px';
+  const menuWidth = 200;
+  const menuHeight = 220;
+  const posX = Math.max(10, Math.min(e.clientX, window.innerWidth - menuWidth - 10));
+  const posY = Math.max(10, Math.min(e.clientY, window.innerHeight - menuHeight - 10));
+  m.style.left = posX + 'px';
+  m.style.top = posY + 'px';
   m.classList.add('show');
 }
 
-document.addEventListener('click', () => {
-  document.getElementById('contextMenu')?.classList.remove('show');
+// Close context menu on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#contextMenu')) {
+    closeCtxMenu();
+  }
 });
 
-// Empty-space right-click handlers to prevent browser context menu & show WireFM custom menu
-function initDomListeners() {
-  document.getElementById('filesContainer')?.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.file-card') || e.target.closest('.file-list-item')) return;
-    showEmptyCtx(e, 'pc');
-  });
+// GLOBAL contextmenu event listener:
+// Completely remove and block native browser inspect / save menu across the entire app!
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault(); // NATIVE MENU COMPLETELY SUPPRESSED EVERYWHERE!
 
-  document.getElementById('phoneContainer')?.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.file-card') || e.target.closest('.file-list-item')) return;
-    if (!isPhoneConnected) return;
-    showEmptyCtx(e, 'phone');
-  });
+  // Check if right click was on a text input or textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    return;
+  }
 
-  document.querySelector('.file-area')?.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.file-card') || e.target.closest('.file-list-item') || e.target.closest('.toolbar')) return;
-    if (currentDevice === 'phone' && !isPhoneConnected) return;
-    showEmptyCtx(e, currentDevice);
-  });
-}
+  // Check if right click was directly on or inside a file card or list item
+  const card = e.target.closest('.file-card, .file-list-item');
+  if (card) {
+    // If it was on a card, the element's oncontextmenu already handles showCtx
+    return;
+  }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initDomListeners);
-} else {
-  initDomListeners();
-}
+  // If clicked anywhere else on empty space (file area, background, sidebar, toolbar, status bar)
+  showEmptyCtx(e, currentDevice);
+});
 
 function ctxOpen() {
+  closeCtxMenu();
   if (ctxIsDir) {
     if (ctxDevice === 'phone') loadPhoneDir(ctxFile);
     else loadFiles(ctxFile);
@@ -834,6 +882,7 @@ function ctxOpen() {
 }
 
 function ctxPreview() {
+  closeCtxMenu();
   if (ctxFile) {
     const ext = '.' + ctxName.split('.').pop().toLowerCase();
     openPreview(ctxFile, ctxName, ext, ctxDevice);
@@ -841,6 +890,7 @@ function ctxPreview() {
 }
 
 function ctxDownload() {
+  closeCtxMenu();
   if (ctxDevice === 'phone') {
     window.open(`${getBase()}/api/phone/download?path=${encodeURIComponent(ctxFile)}&password=${encodeURIComponent(serverPass)}`);
   } else {
@@ -849,6 +899,7 @@ function ctxDownload() {
 }
 
 function ctxCopy() {
+  closeCtxMenu();
   clipboard = {
     path: ctxFile,
     name: ctxName,
@@ -862,6 +913,7 @@ function ctxCopy() {
 }
 
 function ctxCut() {
+  closeCtxMenu();
   clipboard = {
     path: ctxFile,
     name: ctxName,
@@ -886,6 +938,7 @@ function updateClipboardUI() {
 }
 
 async function ctxPaste() {
+  closeCtxMenu();
   if (!clipboard) return;
   const targetDevice = currentDevice;
   const targetDir = (targetDevice === 'phone') ? currentPhonePath : (ctxIsDir ? ctxFile : currentPath);
@@ -983,6 +1036,7 @@ async function ctxPaste() {
 }
 
 async function ctxDelete() {
+  closeCtxMenu();
   if (!confirm(`Are you sure you want to delete "${ctxName}"?`)) return;
   if (ctxDevice === 'phone') {
     try {
@@ -1019,6 +1073,7 @@ async function ctxDelete() {
 }
 
 async function ctxRename() {
+  closeCtxMenu();
   const newName = prompt('Enter new name:', ctxName);
   if (!newName || newName === ctxName) return;
 
@@ -1064,6 +1119,7 @@ async function ctxRename() {
 }
 
 function ctxRefresh() {
+  closeCtxMenu();
   if (currentDevice === 'phone') {
     loadPhoneDir(currentPhonePath);
   } else {
@@ -1073,6 +1129,7 @@ function ctxRefresh() {
 
 // BATCH UPLOAD
 function showUpload() {
+  closeCtxMenu();
   document.getElementById('uploadInput').click();
 }
 
@@ -1096,10 +1153,12 @@ async function uploadFilesList(files) {
           body: formData
         });
         if (uploadRes.ok) {
+          const upData = await uploadRes.json().catch(() => ({}));
+          const uploadedFilePath = (upData.files && upData.files[0]) ? upData.files[0] : ('/tmp/' + f.name);
           await fetch(`${getBase()}/api/phone/copy_from_pc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Password': serverPass },
-            body: JSON.stringify({ pc_path: '/tmp/' + f.name, phone_dest: currentPhonePath, op: 'cut' })
+            body: JSON.stringify({ pc_path: uploadedFilePath, phone_dest: currentPhonePath, op: 'cut' })
           });
         }
       } catch (e) {}
@@ -1133,6 +1192,7 @@ async function uploadFilesList(files) {
 
 // CREATE FOLDER
 async function createFolder() {
+  closeCtxMenu();
   const name = prompt('Enter new folder name:');
   if (!name || !name.trim()) return;
 

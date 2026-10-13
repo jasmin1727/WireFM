@@ -33,22 +33,24 @@ object WireFMClient {
     fun testConnection(ip: String, port: String, pass: String): ServerInfo? {
         return try {
             val req = Request.Builder().url("http://$ip:$port/api/info").build()
-            val res = client.newCall(req).execute()
-            if (res.isSuccessful) {
-                gson.fromJson(res.body?.string(), ServerInfo::class.java)
-            } else null
+            client.newCall(req).execute().use { res ->
+                if (res.isSuccessful) {
+                    gson.fromJson(res.body?.string(), ServerInfo::class.java)
+                } else null
+            }
         } catch (e: Exception) { null }
     }
 
     fun listFiles(ip: String, port: String, pass: String, path: String): List<FileItem>? {
         return try {
             val req = getRequest(ip, port, pass, "/api/files?path=${encode(path)}")
-            val res = client.newCall(req).execute()
-            val body = res.body?.string() ?: return null
-            val json = gson.fromJson(body, Map::class.java)
-            val filesJson = gson.toJson(json["files"])
-            val type = object : TypeToken<List<FileItem>>() {}.type
-            gson.fromJson(filesJson, type)
+            client.newCall(req).execute().use { res ->
+                val body = res.body?.string() ?: return null
+                val json = gson.fromJson(body, Map::class.java)
+                val filesJson = gson.toJson(json["files"])
+                val type = object : TypeToken<List<FileItem>>() {}.type
+                gson.fromJson(filesJson, type)
+            }
         } catch (e: Exception) { null }
     }
 
@@ -56,14 +58,15 @@ object WireFMClient {
         return try {
             destDir.mkdirs()
             val req = getRequest(ip, port, pass, "/api/download?path=${encode(path)}")
-            val res = client.newCall(req).execute()
-            if (!res.isSuccessful) return null
-            val fileName = path.substringAfterLast("/")
-            val file = File(destDir, fileName)
-            res.body?.byteStream()?.use { input ->
-                file.outputStream().use { output -> input.copyTo(output) }
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) return null
+                val fileName = path.substringAfterLast("/")
+                val file = File(destDir, fileName)
+                res.body?.byteStream()?.use { input ->
+                    file.outputStream().use { output -> input.copyTo(output) }
+                }
+                file
             }
-            file
         } catch (e: Exception) { null }
     }
 
@@ -79,24 +82,33 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
     fun uploadStream(ip: String, port: String, pass: String, targetDirPath: String, fileName: String, inputStream: InputStream): Boolean {
         return try {
-            val bytes = inputStream.readBytes()
             val mediaType = "application/octet-stream".toMediaType()
+            val streamingBody = object : RequestBody() {
+                override fun contentType(): MediaType = mediaType
+                override fun writeTo(sink: okio.BufferedSink) {
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                        sink.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
-                .addFormDataPart("file", fileName, bytes.toRequestBody(mediaType))
+                .addFormDataPart("file", fileName, streamingBody)
                 .build()
             val req = Request.Builder()
                 .url("http://$ip:$port/api/upload?path=${encode(targetDirPath)}&password=${encode(pass)}")
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -107,7 +119,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .delete()
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -120,7 +132,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -133,7 +145,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -146,7 +158,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -163,7 +175,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -173,12 +185,13 @@ object WireFMClient {
                 .url("http://$ip:$port/api/phone/poll")
                 .header("X-Password", pass)
                 .build()
-            val res = client.newCall(req).execute()
-            if (res.code == 200) {
-                val body = res.body?.string() ?: return null
-                val cmd = gson.fromJson(body, PhoneCommand::class.java)
-                if (cmd != null && cmd.id.isNotBlank()) cmd else null
-            } else null
+            client.newCall(req).execute().use { res ->
+                if (res.code == 200) {
+                    val body = res.body?.string() ?: return null
+                    val cmd = gson.fromJson(body, PhoneCommand::class.java)
+                    if (cmd != null && cmd.id.isNotBlank()) cmd else null
+                } else null
+            }
         } catch (e: Exception) { null }
     }
 
@@ -195,7 +208,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -212,7 +225,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -225,7 +238,7 @@ object WireFMClient {
                 .header("X-Password", pass)
                 .post(body)
                 .build()
-            client.newCall(req).execute().isSuccessful
+            client.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -234,12 +247,13 @@ object WireFMClient {
             val parent = destFile.parentFile
             if (parent != null && !parent.exists()) parent.mkdirs()
             val req = getRequest(ip, port, pass, "/api/download?path=${encode(pcPath)}")
-            val res = client.newCall(req).execute()
-            if (!res.isSuccessful) return false
-            res.body?.byteStream()?.use { input ->
-                destFile.outputStream().use { output -> input.copyTo(output) }
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) return false
+                res.body?.byteStream()?.use { input ->
+                    destFile.outputStream().use { output -> input.copyTo(output) }
+                }
+                true
             }
-            true
         } catch (e: Exception) { false }
     }
 

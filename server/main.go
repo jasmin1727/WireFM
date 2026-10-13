@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -547,6 +550,45 @@ func phoneRespond(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func getPhoneCachePath(phonePath string) string {
+	cacheDir := filepath.Join(os.TempDir(), "wirefm_cache")
+	os.MkdirAll(cacheDir, 0755)
+	h := md5.New()
+	h.Write([]byte(phonePath))
+	hashStr := hex.EncodeToString(h.Sum(nil))
+	safeName := filepath.Base(phonePath)
+	return filepath.Join(cacheDir, fmt.Sprintf("%s_%s", hashStr, safeName))
+}
+
+func serveCachedPhoneFile(w http.ResponseWriter, r *http.Request, filePath, phonePath string, inline bool) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, "Failed to read cached file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		http.Error(w, "Stat failed", http.StatusInternalServerError)
+		return
+	}
+
+	filename := filepath.Base(phonePath)
+	ctype := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if ctype == "" {
+		ctype = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Accept-Ranges", "bytes")
+	if inline {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+	} else {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	}
+	http.ServeContent(w, r, filename, stat.ModTime(), file)
+}
+
 func phoneStreamUpload(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -561,12 +603,15 @@ func phoneStreamUpload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	defer tmpFile.Close()
 
 	if _, err := io.Copy(tmpFile, r.Body); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	tmpFileName := tmpFile.Name()
+	tmpFile.Close() // Explicitly close to flush file before handing off to reader!
 
 	tokenMu.Lock()
 	ch, ok := tokenWaiters[token]
@@ -574,7 +619,7 @@ func phoneStreamUpload(w http.ResponseWriter, r *http.Request) {
 
 	if ok {
 		select {
-		case ch <- tmpFile.Name():
+		case ch <- tmpFileName:
 		default:
 		}
 	}
@@ -584,16 +629,17 @@ func phoneStreamUpload(w http.ResponseWriter, r *http.Request) {
 
 func phoneListFiles(w http.ResponseWriter, r *http.Request) {
 	phonePath := r.URL.Query().Get("path")
-	if phonePath == "" {
+	if phonePath == "" || phonePath == "/" || phonePath == "~" {
 		phoneMu.Lock()
 		phonePath = phoneState.CurrentPath
-		if phonePath == "" {
+		if phonePath == "" || phonePath == "/" || phonePath == "~" {
 			phonePath = "/storage/emulated/0"
 		}
 		phoneMu.Unlock()
 	}
+	phonePath = path.Clean(phonePath)
 
-	resp, err := sendPhoneCommand("list", phonePath, "", 12*time.Second)
+	resp, err := sendPhoneCommand("list", phonePath, "", 15*time.Second)
 	if err != nil {
 		phoneMu.Lock()
 		cachedFiles := phoneState.Files
@@ -627,9 +673,16 @@ func phoneListFiles(w http.ResponseWriter, r *http.Request) {
 
 func phoneDownload(w http.ResponseWriter, r *http.Request) {
 	phonePath := r.URL.Query().Get("path")
-	inline := r.URL.Query().Get("inline") == "1"
+	inline := r.URL.Query().Get("inline") == "1" || r.URL.Query().Get("inline") == "true"
 	if phonePath == "" {
 		http.Error(w, "Path required", http.StatusBadRequest)
+		return
+	}
+	phonePath = path.Clean(phonePath)
+
+	cacheFile := getPhoneCachePath(phonePath)
+	if fi, err := os.Stat(cacheFile); err == nil && fi.Size() > 0 {
+		serveCachedPhoneFile(w, r, cacheFile, phonePath, inline)
 		return
 	}
 
@@ -655,41 +708,19 @@ func phoneDownload(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case cmdQueue <- cmd:
-	case <-time.After(5 * time.Second):
+	case <-time.After(8 * time.Second):
 		http.Error(w, "Phone busy", http.StatusGatewayTimeout)
 		return
 	}
 
 	select {
-	case filePath := <-tokenChan:
-		defer os.Remove(filePath)
-		file, err := os.Open(filePath)
-		if err != nil {
-			http.Error(w, "Failed to read cached file", http.StatusInternalServerError)
-			return
+	case uploadedPath := <-tokenChan:
+		if uploadedPath != cacheFile {
+			os.Rename(uploadedPath, cacheFile)
 		}
-		defer file.Close()
+		serveCachedPhoneFile(w, r, cacheFile, phonePath, inline)
 
-		stat, err := file.Stat()
-		if err != nil {
-			http.Error(w, "Stat failed", http.StatusInternalServerError)
-			return
-		}
-
-		filename := filepath.Base(phonePath)
-		ctype := mime.TypeByExtension(filepath.Ext(filename))
-		if ctype == "" {
-			ctype = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", ctype)
-		if inline {
-			w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
-		} else {
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-		}
-		http.ServeContent(w, r, filename, stat.ModTime(), file)
-
-	case <-time.After(30 * time.Second):
+	case <-time.After(60 * time.Second):
 		http.Error(w, "Phone read timeout", http.StatusGatewayTimeout)
 	}
 }
@@ -849,10 +880,10 @@ func phoneCopyFromPc(w http.ResponseWriter, r *http.Request) {
 	destFilePath := req.PhoneDest
 	filename := filepath.Base(req.PcPath)
 	if !strings.HasSuffix(destFilePath, filename) {
-		destFilePath = filepath.Join(destFilePath, filename)
+		destFilePath = path.Join(destFilePath, filename)
 	}
 
-	resp, err := sendPhoneCommand("write_from_pc", req.PcPath, destFilePath, 30*time.Second)
+	resp, err := sendPhoneCommand("write_from_pc", req.PcPath, destFilePath, 45*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

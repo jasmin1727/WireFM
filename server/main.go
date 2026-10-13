@@ -509,6 +509,16 @@ func phoneStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(phoneState)
 }
 
+func phoneDisconnect(w http.ResponseWriter, r *http.Request) {
+	phoneMu.Lock()
+	phoneState = PhoneState{
+		Connected: false,
+	}
+	phoneMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
 func phonePoll(w http.ResponseWriter, r *http.Request) {
 	phoneMu.Lock()
 	phoneState.Connected = true
@@ -910,6 +920,27 @@ func serverInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func qrCodeHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	host := r.Host
+	if host == "" || strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
+		ip := getLocalIP()
+		host = net.JoinHostPort(ip, Port)
+	}
+
+	connectURL := fmt.Sprintf("http://%s?password=%s", host, password)
+	png, err := qrcode.Encode(connectURL, qrcode.Medium, 260)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(png)
+}
+
 func getHostname() string {
 	h, err := os.Hostname()
 	if err != nil {
@@ -1030,6 +1061,7 @@ func main() {
 
 	// Info & Auth
 	mux.HandleFunc("/api/info", serverInfo)
+	mux.HandleFunc("/api/qr", qrCodeHandler)
 	mux.HandleFunc("/api/verify", authMiddleware(verifyAuth))
 
 	// File operations (auth required)
@@ -1044,6 +1076,7 @@ func main() {
 	// Mobile Phone Integration
 	mux.HandleFunc("/api/phone/heartbeat", authMiddleware(phoneHeartbeat))
 	mux.HandleFunc("/api/phone/status", authMiddleware(phoneStatus))
+	mux.HandleFunc("/api/phone/disconnect", authMiddleware(phoneDisconnect))
 	mux.HandleFunc("/api/phone/poll", authMiddleware(phonePoll))
 	mux.HandleFunc("/api/phone/respond", authMiddleware(phoneRespond))
 	mux.HandleFunc("/api/phone/stream_upload", authMiddleware(phoneStreamUpload))

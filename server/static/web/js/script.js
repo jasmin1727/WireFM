@@ -120,7 +120,17 @@ async function connect(isAuto = false) {
     document.getElementById('statusText').textContent = `Connected to ${data.user || 'host'}@${data.hostname || 'wirefm'}`;
     const connBtn = document.getElementById('connectBtn');
     connBtn.className = 'btn btn-connected';
-    connBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span>Connected</span>';
+    connBtn.title = 'Click to disconnect';
+    connBtn.innerHTML = `
+      <span class="btn-conn-normal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Connected</span>
+      </span>
+      <span class="btn-conn-hover">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        <span>Disconnect</span>
+      </span>
+    `;
 
     if (!currentPath) {
       currentPath = serverUserRoot;
@@ -144,7 +154,27 @@ function setDisconnectedUI(reason = 'Disconnected') {
   document.getElementById('statusText').textContent = reason;
   const connBtn = document.getElementById('connectBtn');
   connBtn.className = 'btn btn-ghost';
+  connBtn.title = 'Connect to WireFM';
   connBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg><span>Connect</span>';
+}
+
+function handleConnectBtnClick() {
+  if (isConnected) {
+    disconnectServer();
+  } else {
+    showConnect();
+  }
+}
+
+function disconnectServer() {
+  if (confirm('Disconnect from WireFM server?')) {
+    serverPass = '';
+    localStorage.removeItem('wirefm_pass');
+    sessionStorage.removeItem('wirefm_pass');
+    setDisconnectedUI('Disconnected');
+    toast('Disconnected from WireFM', 'info');
+    showConnect();
+  }
 }
 
 function showConnect(errorMsg = '') {
@@ -456,6 +486,10 @@ async function checkPhoneStatus(manual = false) {
       isPhoneConnected = false;
       notConnected.style.display = 'block';
       connected.style.display = 'none';
+      const qrImg = document.getElementById('phoneQrImg');
+      if (qrImg && (!qrImg.src || qrImg.src.indexOf('/api/qr') === -1)) {
+        qrImg.src = `${getBase()}/api/qr?t=${Date.now()}`;
+      }
       if (mainToolbar && currentDevice === 'phone') mainToolbar.style.display = 'none';
       document.getElementById('breadcrumb').innerHTML = `<div class="breadcrumb-item active">📱 Phone / Not Connected</div>`;
       document.getElementById('statusInfo').textContent = 'Phone: Not Connected';
@@ -488,6 +522,23 @@ async function checkPhoneStatus(manual = false) {
     document.getElementById('phoneConnectedView').style.display = 'none';
     const mainToolbar = document.getElementById('mainToolbar');
     if (mainToolbar && currentDevice === 'phone') mainToolbar.style.display = 'none';
+  }
+}
+
+async function disconnectPhone() {
+  if (!confirm('Disconnect mobile phone from WireFM?')) return;
+  try {
+    await fetch(`${getBase()}/api/phone/disconnect`, {
+      headers: { 'X-Password': serverPass }
+    });
+    isPhoneConnected = false;
+    allPhoneFiles = [];
+    toast('Mobile phone disconnected', 'info');
+    checkPhoneStatus();
+  } catch (e) {
+    isPhoneConnected = false;
+    allPhoneFiles = [];
+    checkPhoneStatus();
   }
 }
 

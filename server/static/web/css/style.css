@@ -179,9 +179,30 @@
     background: rgba(34, 197, 94, 0.12);
     color: var(--success);
     border: 1px solid rgba(34, 197, 94, 0.3);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .btn-connected .btn-conn-normal {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-connected .btn-conn-hover {
+    display: none;
   }
   .btn-connected:hover {
-    background: rgba(34, 197, 94, 0.2);
+    background: rgba(239, 68, 68, 0.16) !important;
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, 0.45) !important;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+  }
+  .btn-connected:hover .btn-conn-normal {
+    display: none !important;
+  }
+  .btn-connected:hover .btn-conn-hover {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
   }
   .btn-paste-active {
     background: rgba(139, 92, 246, 0.18);
@@ -524,6 +545,48 @@
     color: var(--text-muted);
     line-height: 1.6;
     max-width: 480px;
+  }
+  .phone-qr-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 4px auto 8px auto;
+  }
+  .phone-qr-card {
+    background: #ffffff;
+    padding: 12px 12px 8px 12px;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .phone-qr-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 36px rgba(139, 92, 246, 0.35), 0 0 0 1px rgba(139, 92, 246, 0.4);
+  }
+  .phone-qr-img {
+    width: 190px;
+    height: 190px;
+    display: block;
+    border-radius: 8px;
+    image-rendering: pixelated;
+  }
+  .phone-qr-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1e1b4b;
+    letter-spacing: 0.2px;
+  }
+  .btn-phone-disconnect:hover {
+    background: rgba(239, 68, 68, 0.15) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #ef4444 !important;
   }
   .phone-steps {
     display: grid;

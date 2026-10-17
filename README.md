@@ -111,8 +111,15 @@ Want to open your phone inside your favorite Linux File Manager?
 ```
 This mounts via `gio` / `kio-fuse` directly into Dolphin or Thunar sidebar!
 
----
 
+
+
+
+
+
+
+---
+                    
 ## 🛠️ Architecture & Tech Stack
 
 ```
@@ -193,6 +200,50 @@ We welcome all developers, designers, and enthusiasts to help:
 Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
 
 Copyright © 2026 **[Jasmin Thakor](https://github.com/jasmin1727)**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
